@@ -138,14 +138,35 @@ class ObituaryReader(WebScraper):
         logger.info("Normalizing existing dates...")
         people = DateNormalizer.normalize_existing_dates(people)
 
+        # Sort people by death date (oldest first)
+        def get_death_date(person):
+            death_date = person.get('death_date')
+            if not death_date:
+                return datetime.max  # Put entries without death dates at the end
+            try:
+                return datetime.strptime(death_date, '%d %b %Y')
+            except ValueError:
+                return datetime.max  # Put entries with invalid dates at the end
+
+        logger.info("Sorting people by death date (oldest first)...")
+        people.sort(key=get_death_date)
+        
+        # Log the order we'll process them in
+        logger.info("\nProcessing order by death date:")
+        for i, person in enumerate(people, 1):
+            death_date = person.get('death_date', 'No death date')
+            name = person.get('name', 'Unknown')
+            logger.info(f"{i}. {name} - {death_date}")
+
         updated_people = []
         for i, person in enumerate(people, 1):
             current_name = person.get('name', 'Unknown')
             person_id = person.get('id', 'No ID')
             url = person.get('url')
             obituary_text = person.get('obituary_text')
+            death_date = person.get('death_date', 'No death date')
 
-            logger.info(f"\nProcessing person {i}/{len(people)}: {current_name} (ID: {person_id})")
+            logger.info(f"\nProcessing person {i}/{len(people)}: {current_name} (ID: {person_id}, Death: {death_date})")
 
             # Skip if URL is invalid
             if not is_valid_url(url):
