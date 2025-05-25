@@ -5,70 +5,47 @@ from bs4 import BeautifulSoup
 import logging
 import argparse
 from datetime import datetime
+from common_classes import DateNormalizer
+from urllib.parse import urlparse
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 logger = logging.getLogger(__name__)
 
-class DateNormalizer:
-    @staticmethod
-    def parse_date(date_str):
-        """Convert various date formats to dd mmm yyyy format."""
-        if not date_str:
-            return None
-        
-        # Common date formats to try
-        formats = [
-            '%B %d, %Y',  # May 24, 2018
-            '%B %d %Y',   # May 24 2018
-            '%d %B %Y',   # 24 May 2018
-            '%d %b %Y',   # 24 May 2018
-            '%b %d %Y',   # May 24 2018
-            '%Y-%m-%d',   # 2018-05-24
-            '%m/%d/%Y',   # 05/24/2018
-            '%d/%m/%Y',   # 24/05/2018
-            '%d %b %Y',   # 24 May 2018
-            '%d %B %Y',   # 24 May 2018
-            '%B %dth, %Y', # May 24th, 2018
-            '%B %dst, %Y', # May 1st, 2018
-            '%B %dnd, %Y', # May 2nd, 2018
-            '%B %drd, %Y', # May 3rd, 2018
-            '%d %B %Y',   # 24 May 2018
-            '%d %b %Y',   # 24 May 2018
-            '%d %B, %Y',  # 24 May, 2018
-            '%d %b, %Y',  # 24 May, 2018
-        ]
-        
-        # Clean up the date string
-        date_str = date_str.strip()
-        # Remove ordinal indicators (st, nd, rd, th)
-        date_str = re.sub(r'(\d+)(st|nd|rd|th)', r'\1', date_str)
-        
-        for fmt in formats:
-            try:
-                date_obj = datetime.strptime(date_str, fmt)
-                return date_obj.strftime('%d %b %Y')
-            except ValueError:
-                continue
-        
-        return None
+def is_valid_url(url):
+    if not url:
+        logger.debug("URL is None or empty")
+        return False
+    parsed = urlparse(url)
+    is_valid = all([parsed.scheme, parsed.netloc])
+    if not is_valid:
+        logger.debug(f"Invalid URL format: {url}")
+    return is_valid
 
-    @classmethod
-    def normalize_existing_dates(cls, people):
-        """Normalize any existing birth_date or death_date fields in the people list."""
-        for person in people:
-            for field in ["birth_date", "death_date"]:
-                val = person.get(field)
-                if val:
-                    normalized = cls.parse_date(val)
-                    if normalized:
-                        person[field] = normalized
-        return people
+def is_invalid_obituary_text(text):
+    if not text or not isinstance(text, str):
+        logger.debug("Obituary text is None or not a string")
+        return True
+    # Consider text invalid if it's too short or contains placeholder text
+    if len(text.strip()) < 20:
+        logger.debug(f"Obituary text too short ({len(text.strip())} chars): {text}")
+        return True
+    if text.strip().lower() in {"n/a", "none", "unknown", "obituary not available"}:
+        logger.debug(f"Obituary text contains placeholder: {text}")
+        return True
+    return False
 
 class ObituaryReader(WebScraper):
     def __init__(self):
         super().__init__(base_url="https://www.legacy.com")
+        logger.info("Initialized ObituaryReader with base URL: https://www.legacy.com")
 
     def extract_fields(self, soup: BeautifulSoup, url: str) -> dict:
+        logger.info(f"Extracting fields from URL: {url}")
+        
         # Extract name from <title>
         title_tag = soup.find('title')
         name = None
@@ -78,13 +55,16 @@ class ObituaryReader(WebScraper):
             name_match = re.match(r'^(.*?) Obituary', title_text)
             if name_match:
                 name = name_match.group(1).strip()
+                logger.info(f"Found name in title: {name}")
             loc_match = re.search(r'- ([^-]+) - [^-]+Funeral Home', title_text)
             if loc_match:
                 location = loc_match.group(1).strip()
+                logger.info(f"Found location in title: {location}")
             else:
                 dash_parts = title_text.split('-')
                 if len(dash_parts) > 1:
                     location = dash_parts[-2].strip()
+                    logger.info(f"Found location in title (alternative format): {location}")
 
         # Extract summary and dates from <meta name="description">
         meta_desc = soup.find('meta', attrs={'name': 'description'})
@@ -94,68 +74,50 @@ class ObituaryReader(WebScraper):
         if meta_desc:
             desc = meta_desc.get('content', '')
             obituary_text = desc
+            logger.info("Found meta description")
             # Try to extract dates from description
-            birth_match = re.search(r'Born (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})', desc)
-            if birth_match:
-                birth_date = DateNormalizer.parse_date(birth_match.group(1))
-            death_match = re.search(r'Died (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})', desc)
-            if death_match:
-                death_date = DateNormalizer.parse_date(death_match.group(1))
+            birth_date = DateNormalizer.find_birth_date(desc)
+            if birth_date:
+                logger.info(f"Found birth date in meta: {birth_date}")
+            death_date = DateNormalizer.find_death_date(desc)
+            if death_date:
+                logger.info(f"Found death date in meta: {death_date}")
 
         # Try to extract the main obituary text from a visible element
         main_obit = ''
         obit_div = soup.find('div', class_=re.compile(r'ObituaryText|obituary-text|obituary__text'))
         if obit_div:
             main_obit = obit_div.get_text(separator=' ', strip=True)
+            logger.info("Found obituary text in main content div")
         elif obituary_text:
             main_obit = obituary_text
+            logger.info("Using meta description as obituary text")
 
         # Try to find dates in the main obituary text if not found in meta
         if not birth_date or not death_date:
-            # Look for patterns like "age 87 years" or "age 80"
-            age_match = re.search(r'age (\d+)(?:\s+years)?', main_obit, re.IGNORECASE)
-            if age_match and death_date:
-                try:
-                    age = int(age_match.group(1))
-                    death_year = int(re.search(r'\d{4}', death_date).group())
-                    birth_year = death_year - age
-                    birth_date = f"01 Jan {birth_year}"
-                except (ValueError, IndexError):
-                    pass
+            logger.info("Searching for dates in main obituary text")
+            # Look for age
+            age = DateNormalizer.find_age(main_obit)
+            if age:
+                logger.info(f"Found age: {age}")
 
-            # Look for patterns like "Born in 1941" or "Born 1941"
-            if not birth_date:
-                birth_year_match = re.search(r'born(?:\s+in)?\s+(\d{4})', main_obit, re.IGNORECASE)
-                if birth_year_match:
-                    birth_year = birth_year_match.group(1)
-                    birth_date = f"01 Jan {birth_year}"
-
-            # Look for death date patterns
+            # Look for death date if not found
             if not death_date:
-                death_patterns = [
-                    r'passed away unexpectedly while mowing grass on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',  # Added pattern for Joseph's case
-                    r'passed away on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
-                    r'died on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
-                    r'passed on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
-                    r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4}) at the age of',
-                    r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4}), age \d+',
-                    r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
-                ]
-                for pattern in death_patterns:
-                    death_match = re.search(pattern, main_obit, re.IGNORECASE)
-                    if death_match:
-                        death_date = DateNormalizer.parse_date(death_match.group(1))
-                        if death_date:
-                            # If we found a death date and have an age, calculate birth date
-                            if not birth_date and age_match:
-                                try:
-                                    age = int(age_match.group(1))
-                                    death_year = int(re.search(r'\d{4}', death_date).group())
-                                    birth_year = death_year - age
-                                    birth_date = f"01 Jan {birth_year}"
-                                except (ValueError, IndexError):
-                                    pass
-                            break
+                death_date = DateNormalizer.find_death_date(main_obit)
+                if death_date:
+                    logger.info(f"Found death date in main text: {death_date}")
+
+            # Calculate birth date from death date and age if we have both
+            if death_date and age and not birth_date:
+                birth_date = DateNormalizer.calculate_birth_date(death_date, age)
+                if birth_date:
+                    logger.info(f"Calculated birth date from death date and age: {birth_date}")
+
+            # Look for birth date if still not found
+            if not birth_date:
+                birth_date = DateNormalizer.find_birth_date(main_obit)
+                if birth_date:
+                    logger.info(f"Found birth date in main text: {birth_date}")
 
         return {
             'name': name,
@@ -166,47 +128,75 @@ class ObituaryReader(WebScraper):
             'url': url
         }
 
-    def read_obituaries(self, people_file: str):
+    def read_obituaries(self, people_file: str, refresh_all: bool = False):
+        logger.info(f"Reading obituaries from file: {people_file}")
         with open(people_file, 'r') as f:
             people = json.load(f)
         logger.info(f"Loaded {len(people)} people from {people_file}")
 
         # Normalize any existing dates before scraping
+        logger.info("Normalizing existing dates...")
         people = DateNormalizer.normalize_existing_dates(people)
 
         updated_people = []
-        for person in people:
-            name = person.get('name', 'Unknown')
+        for i, person in enumerate(people, 1):
+            current_name = person.get('name', 'Unknown')
+            person_id = person.get('id', 'No ID')
             url = person.get('url')
-            if not url:
-                logger.info(f"Skipping {name} (no URL)")
+            obituary_text = person.get('obituary_text')
+
+            logger.info(f"\nProcessing person {i}/{len(people)}: {current_name} (ID: {person_id})")
+
+            # Skip if URL is invalid
+            if not is_valid_url(url):
+                logger.info(f"Skipping {current_name} (ID: {person_id}) - invalid or missing URL")
                 updated_people.append(person)
                 continue
-            
-            logger.info(f"Processing {name} at {url}")
+
+            # Skip if obituary text is valid and we're not refreshing all
+            if not refresh_all and not is_invalid_obituary_text(obituary_text):
+                logger.info(f"Skipping {current_name} (ID: {person_id}) - already has valid obituary text")
+                updated_people.append(person)
+                continue
+
+            if refresh_all:
+                logger.info(f"Refreshing obituary for {current_name} (ID: {person_id}) (--refresh-obits flag set)")
+
+            logger.info(f"Fetching obituary for {current_name} (ID: {person_id}) at {url}")
             soup = self.get_page(url)
             if not soup:
+                logger.warning(f"Failed to fetch page for {current_name} (ID: {person_id})")
                 updated_people.append(person)
                 continue
-            
+
             fields = self.extract_fields(soup, url)
             # Update the person's data with new fields
             person.update({
+                'name': fields['name'] or current_name,  # Use extracted name if available
                 'birth_date': fields['birth_date'] or person.get('birth_date'),
                 'death_date': fields['death_date'] or person.get('death_date'),
                 'location': fields['location'] or person.get('location'),
                 'obituary_text': fields['obituary_text'] or person.get('obituary_text')
             })
+            
+            # Log the name update if it changed
+            if fields['name'] and fields['name'] != current_name:
+                logger.info(f"Updated name from '{current_name}' to '{fields['name']}' for ID: {person_id}")
+            
+            logger.info(f"Updated data for {person['name']} (ID: {person_id})")
             updated_people.append(person)
-        
+
         # Save updated people data back to input file
+        logger.info(f"\nSaving updated data to {people_file}")
         with open(people_file, 'w') as f:
             json.dump(updated_people, f, indent=2)
-        logger.info(f"Updated {people_file} with new data.")
+        logger.info(f"Successfully updated {people_file} with new data.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Read obituary details from URLs in a JSON file.")
     parser.add_argument("input_file", help="Path to the input JSON file containing people data")
+    parser.add_argument("--refresh-obits", action="store_true", 
+                       help="Force re-reading of all obituaries with valid URLs")
     args = parser.parse_args()
     reader = ObituaryReader()
-    reader.read_obituaries(args.input_file) 
+    reader.read_obituaries(args.input_file, args.refresh_obits) 
