@@ -2,8 +2,9 @@ import json
 import re
 import argparse
 from common_classes import NameWeighting
+from name_normalizer import NameNormalizer
 import gender_guesser.detector as gender
-from typing import List, Tuple
+from typing import List, Tuple, Optional, Dict, Any
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -12,35 +13,71 @@ logger = logging.getLogger(__name__)
 def extract_spouses_and_companions(obituary_text, current_last_name=None):
     """
     Extract spouse and companion names from obituary text.
-    Returns a list of (name, relationship) tuples.
+    Returns a list of (name, relationship, maiden_name) tuples.
     """
     results = set()
     # Suffix pattern for names
     suffix_regex = r'(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))'
+    # Middle name/initial pattern
+    middle_regex = r'(?: [A-Z](?:\.|[a-z]+)?)?'
 
-    # Spouse/companion patterns
+    # First, check for maiden name in the format "Last, First M. (NEE Maiden)"
+    maiden_pattern = re.compile(r'([A-Z][a-z]+),\s+([A-Z][a-z]+)' + middle_regex + r'(?:{suffix_regex})?\s*\(NEE\s+([^)]+)\)', re.IGNORECASE)
+    maiden_match = maiden_pattern.search(obituary_text)
+    if maiden_match:
+        last_name = maiden_match.group(1)
+        first_name = maiden_match.group(2)
+        # Try to get middle name/initial
+        middle_name = None
+        m = re.match(r'([A-Z][a-z]+),\s+([A-Z][a-z]+)(?: ([A-Z](?:\.|[a-z]+)?))?', maiden_match.group(0))
+        if m and m.group(3):
+            middle_name = m.group(3).strip()
+        maiden_name = maiden_match.group(3)
+        suffix = maiden_match.group(4) if len(maiden_match.groups()) > 3 else None
+        full_name = f"{first_name}"
+        if middle_name:
+            full_name += f" {middle_name}"
+        full_name += f" {last_name}"
+        if suffix:
+            full_name = f"{full_name} {suffix}"
+        results.add((full_name, 'self', maiden_name))
+        current_last_name = last_name
+
+    # Spouse/companion patterns (now with optional middle name/initial)
     spouse_patterns = [
-        (rf'beloved (?:wife|husband|spouse) of ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'spouse'),
-        (rf'(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'spouse'),
-        (rf'(?:married to|married) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'spouse'),
-        (rf'(?:companion of|companion|partner of|partner) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'companion'),
-        (rf'([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})? \(companion\)', 'companion'),
-        (rf'Survived by ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?, (?:his|her|their) constant companion', 'companion'),
+        # Pattern for NEE format in parentheses
+        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(NEE ([^)]+)\)', 'spouse'),
+        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(nee ([^)]+)\)', 'spouse'),
+        # Original patterns
+        (rf'beloved (?:wife|husband|spouse) of ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:married to|married) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:companion of|companion|partner of|partner) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'companion'),
+        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(companion\)(?: \(nee ([^)]+)\))?', 'companion'),
+        (rf'Survived by ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?, (?:his|her|their) constant companion(?: \(nee ([^)]+)\))?', 'companion'),
         # New patterns for better spouse detection
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) of ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})? and (?:their|his|her) children', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})? and family', 'spouse'),
-        # Patterns for companion detection
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:companion|partner) ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'companion'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:companion|partner) of ([A-Z][a-z]+(?: [A-Z][a-z]+)?)(?:{suffix_regex})?(?: \(nee [^)]+\))?', 'companion'),
+        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) of ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? and (?:their|his|her) children(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? and family(?: \(nee ([^)]+)\))?', 'spouse'),
+        # Pattern for single name spouses (will use current_last_name)
+        (rf'(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:married to|married) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
+        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
     ]
+    
     for pattern, relationship in spouse_patterns:
         for match in re.finditer(pattern, obituary_text, re.IGNORECASE):
             logger.debug(f"[SPOUSE] Pattern: {pattern}")
             logger.debug(f"[SPOUSE] Raw match: {match.group(0)} | Groups: {match.groups()} | Relationship: {relationship}")
             name = match.group(1)
             suffix = match.group(2) if len(match.groups()) > 1 else None
+            maiden_name = match.group(3) if len(match.groups()) > 2 else None
+            
+            # Skip if name contains 'and' or other conjunctions
+            if re.search(r'\b(and|or|but|with)\b', name, re.IGNORECASE):
+                continue
+                
             if suffix:
                 name = f"{name} {suffix}"
             # Remove parenthetical content and extra whitespace
@@ -49,9 +86,16 @@ def extract_spouses_and_companions(obituary_text, current_last_name=None):
             clean = re.sub(r'nee\s+[^,]+', '', clean).strip()
             # Handle titles
             clean = re.sub(r'^(?:Dr\.|Mr\.|Mrs\.|Ms\.|Rev\.|Fr\.)\s+', '', clean).strip()
+            # Remove any trailing conjunctions
+            clean = re.sub(r'\s+(?:and|or|but|with|,)$', '', clean, flags=re.IGNORECASE).strip()
+            
+            # If the name is just a first name and we have a current_last_name, use it
+            if ' ' not in clean and current_last_name:
+                clean = f"{clean} {current_last_name}"
+            
             # Only consider if at least two words (likely a name)
             if len(clean.split()) >= 2:
-                results.add((clean, relationship))
+                results.add((clean, relationship, maiden_name))
     return list(results)
 
 def is_name_variation(name1: str, name2: str) -> bool:
@@ -120,7 +164,7 @@ def extract_family_names(obituary_text: str, current_last_name: str) -> List[Tup
             relationships[person2].add((person1, 'sibling'))
     
     # Extract spouses and companions
-    for name, rel in extract_spouses_and_companions(obituary_text, current_last_name):
+    for name, rel, maiden_name in extract_spouses_and_companions(obituary_text, current_last_name):
         logger.debug(f"[SPOUSE][MODULAR] Adding: {name} ({rel})")
         add_name(name, rel)
         if rel == 'spouse':
@@ -189,26 +233,80 @@ def extract_family_names(obituary_text: str, current_last_name: str) -> List[Tup
     
     return final_results
 
-def parse_name(full_name: str) -> Tuple[str, str]:
-    """Parse a full name into first and last name components."""
-    # Remove any suffixes
-    suffixes = ['jr', 'sr', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x']
-    name_parts = full_name.split()
-    if len(name_parts) >= 2:
-        # Check if the last part is a suffix
-        last_part = name_parts[-1].lower().replace('.', '')
-        if last_part in suffixes:
-            # Remove the suffix
-            name_parts = name_parts[:-1]
-            # If there's a comma before the suffix, remove it too
-            if name_parts[-1].endswith(','):
-                name_parts[-1] = name_parts[-1][:-1]
+def parse_name(full_name: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Parse a full name into its components."""
+    # Remove any trailing conjunctions
+    full_name = re.sub(r'\s+(?:and|&)\s*$', '', full_name)
     
-    if len(name_parts) >= 2:
-        first_name = name_parts[0]
-        last_name = ' '.join(name_parts[1:])
-        return first_name, last_name
-    return full_name, ''
+    # Skip if name contains 'and' or other conjunctions in the middle
+    if re.search(r'\b(and|or|but|with)\b', full_name, re.IGNORECASE):
+        return None, None, None, None, None
+    
+    # Extract nickname if present
+    nickname = None
+    if '"' in full_name:
+        match = re.search(r'"([^"]+)"', full_name)
+        if match:
+            nickname = match.group(1)
+            full_name = full_name.replace(f'"{nickname}"', '').strip()
+    elif '(' in full_name:
+        match = re.search(r'\(([^)]+)\)', full_name)
+        if match:
+            nickname = match.group(1)
+            full_name = full_name.replace(f'({nickname})', '').strip()
+    elif ' aka ' in full_name.lower():
+        parts = full_name.split(' aka ', 1)
+        full_name = parts[0].strip()
+        nickname = parts[1].strip()
+    
+    # Split on spaces and handle suffixes
+    parts = full_name.split()
+    if not parts:
+        return None, None, None, None, None
+        
+    # Handle suffixes
+    suffix = None
+    if parts[-1].upper() in ['JR', 'SR', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']:
+        suffix = parts[-1].upper()
+        parts = parts[:-1]
+    elif parts[-1].lower() in ['jr.', 'sr.']:
+        suffix = parts[-1].lower()
+        parts = parts[:-1]
+    
+    # Handle middle names/initials
+    middle = None
+    if len(parts) > 2:
+        # Check if the middle part is an initial
+        if len(parts[1]) == 1 or (len(parts[1]) == 2 and parts[1][1] == '.'):
+            middle = parts[1]
+            first = parts[0]
+            last = ' '.join(parts[2:])
+        else:
+            # Assume it's a middle name
+            first = parts[0]
+            middle = parts[1]
+            last = ' '.join(parts[2:])
+    elif len(parts) == 2:
+        first, last = parts
+    else:
+        return None, None, None, None, None
+    
+    # Clean up the names
+    first = first.strip('.,')
+    if middle:
+        middle = middle.strip('.,')
+    last = last.strip('.,')
+    
+    # Validate names
+    if not first or not last or first.lower() in ['and', '&'] or last.lower() in ['and', '&']:
+        return None, None, None, None, None
+    
+    # Skip if any part contains conjunctions
+    invalid_words = ['and', 'or', 'but', 'with', 'the', 'a', 'an']
+    if any(word.lower() in invalid_words for word in [first, middle, last] if word):
+        return None, None, None, None, None
+    
+    return first, middle, last, suffix, nickname
 
 def is_valid_name(first_name: str, last_name: str) -> bool:
     """Check if a name is valid."""
@@ -219,6 +317,14 @@ def is_valid_name(first_name: str, last_name: str) -> bool:
     # Remove any trailing commas
     last_name = last_name.rstrip(',')
     if not last_name:
+        return False
+    # Check for invalid last names (conjunctions, etc.)
+    invalid_last_names = ['and', 'or', 'but', 'with', 'the', 'a', 'an']
+    if last_name.lower() in invalid_last_names:
+        return False
+    # Check for invalid first names (conjunctions, etc.)
+    invalid_first_names = ['and', 'or', 'but', 'with', 'the', 'a', 'an']
+    if first_name.lower() in invalid_first_names:
         return False
     return True
 
@@ -615,8 +721,318 @@ def extract_children_of_couples(obituary_text, current_last_name=None):
     
     return list(results)
 
+def extract_preceded_in_death_names(obituary_text: str, current_last_name: str) -> List[str]:
+    """Extract names from 'preceded in death by' sections."""
+    preceded_patterns = [
+        r'preceded in death by (?:his|her|their)?\s*([^.;]+)',
+        r'reunited with (?:his|her|their)?\s*([^.;]+)',
+        r'the late ([^.;]+)',
+        r'late ([^.;]+)'
+    ]
+    
+    found_names = []
+    for pattern in preceded_patterns:
+        matches = re.finditer(pattern, obituary_text, re.IGNORECASE)
+        for match in matches:
+            names_text = match.group(1)
+            # Split on common conjunctions
+            names = re.split(r',\s*|\s+and\s+|\s*&\s*', names_text)
+            for name in names:
+                name = name.strip()
+                if name:
+                    # If it's just a first name, append the current last name
+                    if ' ' not in name:
+                        name = f"{name} {current_last_name}"
+                    found_names.append(name)
+    
+    return found_names
+
+def extract_obituary_owner(obituary_text: str) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str], Optional[str], Optional[str]]:
+    """Extract the name of the person the obituary is about."""
+    # Use the first non-empty line as the primary source
+    lines = [line.strip() for line in obituary_text.split('\n') if line.strip()]
+    if lines:
+        first_line = lines[0]
+        # Try "Last, First M. (NEE Maiden)" or "Last, First M." headline
+        headline_pattern = re.compile(r'^([A-Z][a-z]+),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?:\s*\(NEE\s+([^)]+)\))?', re.IGNORECASE)
+        m = headline_pattern.match(first_line)
+        if m:
+            last_name = m.group(1)
+            first_part = m.group(2)
+            maiden_name = m.group(3)
+            first_parts = first_part.split()
+            first_name = first_parts[0]
+            middle_name = ' '.join(first_parts[1:]) if len(first_parts) > 1 else None
+            return first_name, middle_name, last_name, None, maiden_name, None
+        # Try "First M. Last (NEE Maiden)" or "First M. Last" headline
+        headline_pattern2 = re.compile(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+([A-Z][a-z]+)(?:\s*\(NEE\s+([^)]+)\))?', re.IGNORECASE)
+        m2 = headline_pattern2.match(first_line)
+        if m2:
+            first_part = m2.group(1)
+            last_name = m2.group(2)
+            maiden_name = m2.group(3)
+            first_parts = first_part.split()
+            first_name = first_parts[0]
+            middle_name = ' '.join(first_parts[1:]) if len(first_parts) > 1 else None
+            return first_name, middle_name, last_name, None, maiden_name, None
+    # Fallback: scan the first paragraph for a likely full name
+    paragraphs = obituary_text.split('\n\n')
+    if paragraphs:
+        first_para = paragraphs[0]
+        # Look for the first occurrence of two or more capitalized words (likely a full name)
+        name_pattern = re.compile(r'([A-Z][a-z]+(?: [A-Z][a-z]+)+)')
+        name_match = name_pattern.search(first_para)
+        if name_match:
+            full_name = name_match.group(1)
+            # Try to parse out first, middle, last
+            parts = full_name.split()
+            if len(parts) == 2:
+                first_name, last_name = parts
+                return first_name, None, last_name, None, None, None
+            elif len(parts) > 2:
+                first_name = parts[0]
+                middle_name = ' '.join(parts[1:-1])
+                last_name = parts[-1]
+                return first_name, middle_name, last_name, None, None, None
+    # Fallback: scan the entire obituary for the first likely full name (with optional middle initial and suffix)
+    # Pattern: First [Middle/Initial] Last [Suffix]
+    name_pattern = re.compile(r'([A-Z][a-z]+)(?: ([A-Z]\.|[A-Z][a-z]+))? ([A-Z][a-z]+)(?:,? (Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?')
+    for match in name_pattern.finditer(obituary_text):
+        first_name = match.group(1)
+        middle_name = match.group(2)
+        last_name = match.group(3)
+        suffix = match.group(4)
+        # Heuristic: skip if first_name is a common word (e.g., Born, Passed, Survived, etc.)
+        if first_name.lower() in ['born', 'passed', 'survived', 'died', 'was', 'and', 'the', 'in', 'on', 'by', 'for', 'with', 'to', 'from', 'at', 'of', 'his', 'her', 'their', 'he', 'she', 'it', 'a', 'an']:
+            continue
+        # Heuristic: skip if last_name is a common word
+        if last_name.lower() in ['born', 'passed', 'survived', 'died', 'was', 'and', 'the', 'in', 'on', 'by', 'for', 'with', 'to', 'from', 'at', 'of', 'his', 'her', 'their', 'he', 'she', 'it', 'a', 'an']:
+            continue
+        return first_name, middle_name, last_name, suffix, None, None
+    # Fallback to previous regexes on the whole text
+    # Pattern for "Last, First M. (NEE Maiden)"
+    maiden_pattern = re.compile(r'([A-Z][a-z]+),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?:,?\s+(?:Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?\s*\(NEE\s+([^)]+)\)', re.IGNORECASE)
+    maiden_match = maiden_pattern.search(obituary_text)
+    if maiden_match:
+        last_name = maiden_match.group(1)
+        first_name = maiden_match.group(2)
+        maiden_name = maiden_match.group(3)
+        # Try to get middle name/initial
+        middle_name = None
+        m = re.match(r'([A-Z][a-z]+),\s+([A-Z][a-z]+)(?: ([A-Z](?:\.|[a-z]+)?))?', maiden_match.group(0))
+        if m and m.group(3):
+            middle_name = m.group(3).strip()
+        return first_name, middle_name, last_name, None, maiden_name, None
+    # Pattern for "First M. Last (NEE Maiden)"
+    pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+([A-Z][a-z]+)(?:,?\s+(?:Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?\s*\(NEE\s+([^)]+)\)', re.IGNORECASE)
+    match = pattern.search(obituary_text)
+    if match:
+        first_part = match.group(1)
+        last_name = match.group(2)
+        maiden_name = match.group(3)
+        # Split first part into first and middle names
+        first_parts = first_part.split()
+        first_name = first_parts[0]
+        middle_name = ' '.join(first_parts[1:]) if len(first_parts) > 1 else None
+        return first_name, middle_name, last_name, None, maiden_name, None
+    # Pattern for "First M. Last"
+    pattern = re.compile(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+([A-Z][a-z]+)(?:,?\s+(?:Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?', re.IGNORECASE)
+    match = pattern.search(obituary_text)
+    if match:
+        first_part = match.group(1)
+        last_name = match.group(2)
+        # Split first part into first and middle names
+        first_parts = first_part.split()
+        first_name = first_parts[0]
+        middle_name = ' '.join(first_parts[1:]) if len(first_parts) > 1 else None
+        return first_name, middle_name, last_name, None, None, None
+    # Pattern for "Last, First M."
+    pattern = re.compile(r'([A-Z][a-z]+),\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)(?:,?\s+(?:Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?', re.IGNORECASE)
+    match = pattern.search(obituary_text)
+    if match:
+        last_name = match.group(1)
+        first_part = match.group(2)
+        # Split first part into first and middle names
+        first_parts = first_part.split()
+        first_name = first_parts[0]
+        middle_name = ' '.join(first_parts[1:]) if len(first_parts) > 1 else None
+        return first_name, middle_name, last_name, None, None, None
+    # Pattern for "Born [date]... Passed away..."
+    pattern = re.compile(r'Born [^.]*\. Passed away', re.IGNORECASE)
+    if pattern.search(obituary_text):
+        # Look for the first name in the text
+        name_pattern = re.compile(r'([A-Z][a-z]+) was (?:always|a|an)', re.IGNORECASE)
+        name_match = name_pattern.search(obituary_text)
+        if name_match:
+            first_name = name_match.group(1)
+            # Look for the last name in the text
+            last_name_pattern = re.compile(r'([A-Z][a-z]+) was a \d+-year employee', re.IGNORECASE)
+            last_name_match = last_name_pattern.search(obituary_text)
+            if last_name_match:
+                last_name = last_name_match.group(1)
+                return first_name, None, last_name, None, None, None
+    return None, None, None, None, None, None
+
+def extract_names(obituary_text: str, name_normalizer: NameNormalizer) -> List[Dict[str, Any]]:
+    """Extract names and relationships from obituary text."""
+    names = []
+    
+    # Define suffix pattern
+    suffix_pattern = r'(?:,?\s+(?:Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?'
+    
+    # First try to extract the deceased's name from the title or first line
+    deceased_name = None
+    if obituary_text.startswith("Obituary for "):
+        deceased_name = obituary_text.split("\n")[0].replace("Obituary for ", "").strip()
+    else:
+        # Try to find the deceased's name in the first paragraph
+        first_para = obituary_text.split('\n\n')[0] if '\n\n' in obituary_text else obituary_text
+        name_match = re.search(r'([A-Z][a-z]+(?: [A-Z][a-z]+)+' + suffix_pattern + r')(?:\s+passed away|\s+died|\s+was born)', first_para)
+        if name_match:
+            deceased_name = name_match.group(1).strip()
+    
+    # Extract names using various patterns
+    name_patterns = [
+        # Spouse patterns with maiden names, nicknames, and suffixes
+        (r'(?:wife|husband) of the late\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'spouse'),
+        (r'(?:wife|husband) of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'spouse'),
+        (r'(?:wife|husband)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'spouse'),
+        (r'(?:married to|married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'spouse'),
+        
+        # Parent patterns with maiden names, nicknames, and suffixes
+        (r'(?:son|daughter) of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'parent'),
+        (r'(?:son|daughter) of the late\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'parent'),
+        (r'(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'parent'),
+        
+        # Sibling patterns with maiden names, nicknames, and suffixes
+        (r'(?:brother|sister) of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'sibling'),
+        (r'(?:brother|sister) of the late\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'sibling'),
+        (r'(?:brother|sister)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'sibling'),
+        
+        # Child patterns with maiden names, nicknames, and suffixes
+        (r'(?:father|mother) of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'child'),
+        (r'(?:father|mother) of the late\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'child'),
+        (r'(?:father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'child'),
+        
+        # General name patterns with maiden names, nicknames, and suffixes
+        (r'(?:Mr\.|Mrs\.|Ms\.|Dr\.)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'unknown'),
+        (r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*' + suffix_pattern + r')(?:\s+\(nee\s+([^)]+)\))?(?:\s+\(([^)]+)\))?', 'unknown')
+    ]
+    
+    # First add the deceased if we found them
+    if deceased_name:
+        normalized = name_normalizer.normalize_name(deceased_name)
+        if normalized:
+            # Check for maiden name in the deceased's name
+            maiden_match = re.search(r'\(nee\s+([^)]+)\)', deceased_name, re.IGNORECASE)
+            maiden_name = maiden_match.group(1).strip() if maiden_match else None
+            
+            # Check for nickname in the deceased's name
+            nickname_match = re.search(r'\(([^)]+)\)', deceased_name)
+            nickname = nickname_match.group(1).strip() if nickname_match and not maiden_match else None
+            
+            # Extract suffix
+            suffix_match = re.search(r',?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X)$', deceased_name)
+            suffix = suffix_match.group(1) if suffix_match else None
+            
+            name_dict = {
+                'name': normalized,
+                'relationship': 'deceased',
+                'original': deceased_name
+            }
+            if maiden_name:
+                name_dict['maiden_name'] = maiden_name
+            if nickname:
+                name_dict['nickname'] = nickname
+            if suffix:
+                name_dict['suffix'] = suffix
+            names.append(name_dict)
+    
+    # Then process the rest of the text
+    for pattern, relationship in name_patterns:
+        matches = re.finditer(pattern, obituary_text, re.IGNORECASE)
+        for match in matches:
+            name = match.group(1).strip()
+            maiden_name = match.group(2) if len(match.groups()) > 1 and match.group(2) else None
+            nickname = match.group(3) if len(match.groups()) > 2 and match.group(3) else None
+            
+            # Skip if this is the deceased's name
+            if deceased_name and name_normalizer.normalize_name(name) == name_normalizer.normalize_name(deceased_name):
+                continue
+            
+            # Skip if name contains 'and' or other conjunctions
+            if re.search(r'\b(and|or|but|with)\b', name, re.IGNORECASE):
+                continue
+                
+            normalized = name_normalizer.normalize_name(name)
+            if normalized:
+                # Extract suffix
+                suffix_match = re.search(r',?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X)$', name)
+                suffix = suffix_match.group(1) if suffix_match else None
+                
+                name_dict = {
+                    'name': normalized,
+                    'relationship': relationship,
+                    'original': name
+                }
+                if maiden_name:
+                    name_dict['maiden_name'] = maiden_name.strip()
+                if nickname:
+                    name_dict['nickname'] = nickname.strip()
+                if suffix:
+                    name_dict['suffix'] = suffix
+                names.append(name_dict)
+    
+    return names
+
+def process_obituary(obituary: Dict[str, Any], name_normalizer: NameNormalizer) -> Dict[str, Any]:
+    """Process a single obituary and extract names and relationships."""
+    result = {
+        'name': obituary.get('name', ''),
+        'birth_date': obituary.get('birth_date', ''),
+        'death_date': obituary.get('death_date', ''),
+        'location': obituary.get('location', ''),
+        'url': obituary.get('url', ''),
+        'people': []
+    }
+    
+    # Get the obituary text, preferring the full text if available
+    obituary_text = obituary.get('obituary_text', '')
+    if not obituary_text:
+        obituary_text = obituary.get('text', '')
+    
+    if not obituary_text:
+        return result
+    
+    # Extract names from the text
+    names = extract_names(obituary_text, name_normalizer)
+    
+    # Add the deceased if not already in the list
+    if result['name'] and not any(n['name'] == name_normalizer.normalize_name(result['name']) for n in names):
+        names.append({
+            'name': name_normalizer.normalize_name(result['name']),
+            'relationship': 'deceased',
+            'original': result['name']
+        })
+    
+    # Add all found names to the result
+    result['people'] = names
+    
+    # Add any maiden names found in the text
+    maiden_pattern = re.compile(r'\(nee\s+([^)]+)\)', re.IGNORECASE)
+    maiden_matches = maiden_pattern.finditer(obituary_text)
+    for match in maiden_matches:
+        maiden_name = match.group(1).strip()
+        # Try to find the corresponding person
+        for person in result['people']:
+            if 'maiden_name' not in person:
+                person['maiden_name'] = maiden_name
+                break
+    
+    return result
+
 def main():
-    parser = argparse.ArgumentParser(description="Find all family people in obituaries.")
+    parser = argparse.ArgumentParser(description="Process obituaries to identify the deceased person.")
     parser.add_argument("input_file", help="Path to the input JSON file containing people data")
     parser.add_argument("--debug", action="store_true", help="Print results to STDOUT instead of writing to file")
     args = parser.parse_args()
@@ -631,270 +1047,31 @@ def main():
     people_with_obituaries = [p for p in people if p.get('obituary_text')]
     logger.info(f"Processing {len(people_with_obituaries)} people with obituaries out of {len(people)} total people")
 
-    # Add IDs to people if they don't have them
-    for i, person in enumerate(people):
-        if 'id' not in person:
-            person['id'] = f"P{i+1:04d}"
-        # Initialize relationship fields if they don't exist
-        for rel in ['spouse', 'companion', 'father', 'mother']:
-            if rel not in person:
-                person[rel] = None
-        if 'children' not in person:
-            person['children'] = []
-        if 'siblings' not in person:
-            person['siblings'] = []
-        # Remove maiden_name field if it exists
-        if 'maiden_name' in person:
-            del person['maiden_name']
-
-    # Build set of known (first, last) names and create a lookup dictionary
-    known_names = set((p.get('first_name', '').lower(), p.get('last_name', '').lower()) for p in people)
-    name_lookup = {(p.get('first_name', '').lower(), p.get('last_name', '').lower()): p for p in people if 'id' in p}
-    name_weighting = NameWeighting({str(i): p for i, p in enumerate(people)})
-
-    new_people = []
-    spouse_relationships = []  # Store spouse relationships to process after all people are created
-    parent_child_relationships = []  # Store parent-child relationships to process after all people are created
-    child_parent_links = []  # Store child-parent relationships to process after all people are created
-    
-    # Only process people with obituaries
+    # Process each person with an obituary
     for person in people_with_obituaries:
-        obituary_text = person['obituary_text']  # We know this exists from the filter
-        current_last_name = person.get('last_name', '')
-        found_names = extract_family_names(obituary_text, current_last_name)
-        # --- NEW: process children of couples for parent links ---
-        for child_name, rel, mother, father in extract_children_of_couples(obituary_text, current_last_name):
-            if rel == 'child':
-                child_parent_links.append((child_name, mother, father))
-        # --- END NEW ---
-        for full_name, relationship in found_names:
-            logger.info(f"Found name: '{full_name}' with relationship: {relationship}")
-            first, last = parse_name(full_name)
-            if not first or not last:
-                logger.info(f"Skipping '{full_name}' (could not parse first/last name)")
-                continue
-            if not is_valid_name(first, last):
-                logger.info(f"Filtered out as invalid: '{first} {last}' (from '{full_name}')")
-                continue
-            # Normalize last name using name checker
-            last = name_weighting.correct_last_name(last, obituary_text)
-            key = (first.lower(), last.lower())
-            if key not in known_names:
-                logger.info(f"Adding new person: {first} {last} ({relationship}) from '{full_name}'")
-                new_person = {
-                    'id': f"P{len(people) + len(new_people) + 1:04d}",
-                    'first_name': first,
-                    'last_name': last,
-                    'birth_date': None,
-                    'death_date': None,
-                    'url': None,
-                    'spouse': None,
-                    'companion': None,
-                    'father': None,
-                    'mother': None,
-                    'children': [],
-                    'siblings': []
-                }
-                # Set the appropriate relationship field
-                if isinstance(relationship, tuple):
-                    if relationship[0] == 'spouse':
-                        spouse_relationships.append((new_person, relationship[1]))
-                    elif relationship[0] == 'parent':
-                        parent_child_relationships.append((new_person, relationship[1]))
-                elif relationship in ['spouse', 'companion']:
-                    new_person[relationship] = person.get('id')
-                    person[relationship] = new_person['id']
-                elif relationship in ['father', 'mother']:
-                    person[relationship] = new_person['id']
-                    new_person['children'] = [person['id']]
-                elif relationship == 'sibling':
-                    # Add bidirectional sibling relationship
-                    new_person['siblings'].append(person['id'])
-                    person['siblings'].append(new_person['id'])
-                    # Also add this new sibling to all other siblings of the person
-                    for sib_id in person['siblings']:
-                        if sib_id == new_person['id']:
-                            continue
-                        sib = name_lookup.get((next((p['first_name'].lower(), p['last_name'].lower()) for p in people + new_people if p['id'] == sib_id), None))
-                        if sib and new_person['id'] not in sib['siblings']:
-                            sib['siblings'].append(new_person['id'])
-                        if sib and sib['id'] not in new_person['siblings']:
-                            new_person['siblings'].append(sib['id'])
-                new_people.append(new_person)
-                known_names.add(key)
-                name_lookup[key] = new_person
-            else:
-                logger.info(f"Already known: {first} {last} (from '{full_name}')")
-                if relationship in ['father', 'mother']:
-                    parent = name_lookup[key]
-                    if 'children' not in parent:
-                        parent['children'] = []
-                    if person['id'] not in parent['children']:
-                        parent['children'].append(person['id'])
-                    person[relationship] = parent['id']
-                elif relationship == 'sibling':
-                    sibling = name_lookup[key]
-                    if 'siblings' not in sibling:
-                        sibling['siblings'] = []
-                    if person['id'] not in sibling['siblings']:
-                        sibling['siblings'].append(person['id'])
-                    if 'siblings' not in person:
-                        person['siblings'] = []
-                    if sibling['id'] not in person['siblings']:
-                        person['siblings'].append(sibling['id'])
-                    # Also add this sibling to all other siblings of the person
-                    for sib_id in person['siblings']:
-                        if sib_id == sibling['id']:
-                            continue
-                        sib = name_lookup.get((next((p['first_name'].lower(), p['last_name'].lower()) for p in people + new_people if p['id'] == sib_id), None))
-                        if sib and sibling['id'] not in sib['siblings']:
-                            sib['siblings'].append(sibling['id'])
-                        if sib and sib['id'] not in sibling['siblings']:
-                            sibling['siblings'].append(sib['id'])
-
-    # Second pass: link children to parents
-    for child_full, mother_full, father_full in child_parent_links:
-        c_first, c_last = parse_name(child_full)
-        c_key = (c_first.lower(), c_last.lower())
-        child = name_lookup.get(c_key)
-        if not child:
-            for k, v in name_lookup.items():
-                if c_first.lower() in k[0] and c_last.lower() in k[1]:
-                    child = v
-                    break
-            if not child:
-                continue
-        # Find mother
-        if mother_full:
-            m_first, m_last = parse_name(mother_full)
-            m_key = (m_first.lower(), m_last.lower())
-            mother = name_lookup.get(m_key)
-            if not mother:
-                for k, v in name_lookup.items():
-                    if m_first.lower() in k[0] and m_last.lower() in k[1]:
-                        mother = v
-                        break
-            if mother:
-                child['mother'] = mother['id']
-                if child['id'] not in mother['children']:
-                    mother['children'].append(child['id'])
-
-    # Additional pass: link children to parents based on spouse relationships
-    for person in people + new_people:
-        if person.get('spouse'):
-            spouse = name_lookup.get((person['spouse'].lower(), person['last_name'].lower()))
-            if spouse and spouse.get('children'):
-                for child_id in spouse['children']:
-                    child = next((p for p in people + new_people if p['id'] == child_id), None)
-                    if child:
-                        # If child has one parent but not the other, add the missing parent
-                        if child.get('mother') == spouse['id'] and not child.get('father'):
-                            child['father'] = person['id']
-                            if child['id'] not in person['children']:
-                                person['children'].append(child['id'])
-                        elif child.get('father') == spouse['id'] and not child.get('mother'):
-                            child['mother'] = person['id']
-                            if child['id'] not in person['children']:
-                                person['children'].append(child['id'])
-
-    # Process spouse relationships after all people are created
-    for spouse, sibling_name in spouse_relationships:
-        # Add the last name to the sibling name if it's not already there
-        if ' ' not in sibling_name:
-            sibling_name = f"{sibling_name} {current_last_name}"
-        sibling_first, sibling_last = parse_name(sibling_name)
-        if sibling_first and sibling_last:
-            sibling_key = (sibling_first.lower(), sibling_last.lower())
-            if sibling_key in name_lookup:
-                sibling = name_lookup[sibling_key]
-                # Link the spouse to the sibling
-                spouse['spouse'] = sibling['id']
-                sibling['spouse'] = spouse['id']
-                # If one is marked as companion, update both to be companions
-                if spouse.get('companion') or sibling.get('companion'):
-                    spouse['companion'] = sibling['id']
-                    sibling['companion'] = spouse['id']
-                    spouse['spouse'] = None
-                    sibling['spouse'] = None
-
-    # Process parent-child relationships after all people are created
-    for parent, child_name in parent_child_relationships:
-        child_first, child_last = parse_name(child_name)
-        if child_first and child_last:
-            child_key = (child_first.lower(), child_last.lower())
-            if child_key in name_lookup:
-                child = name_lookup[child_key]
-                # Link the parent to the child
-                child['father'] = parent['id']
-                # Add the child to the parent's children array
-                if 'children' not in parent:
-                    parent['children'] = []
-                if child['id'] not in parent['children']:
-                    parent['children'].append(child['id'])
-
-    # Clean up any incorrect sibling relationships
-    for person in people + new_people:
-        if 'siblings' in person:
-            # Remove any siblings that are actually parents or children
-            person['siblings'] = [s for s in person['siblings'] if not (
-                s == person.get('father') or 
-                s == person.get('mother') or 
-                s in person.get('children', [])
-            )]
-
-    # Combine original and new people
-    all_people = people + new_people
-
-    # Ensure all siblings are mutually connected
-    id_map = {p['id']: p for p in all_people}
-    
-    # First pass: collect all sibling groups
-    sibling_groups = []
-    processed_ids = set()
-    
-    for person in all_people:
-        if person['id'] in processed_ids:
-            continue
-            
-        sibs = person.get('siblings', [])
-        if sibs:
-            # Start a new sibling group
-            group = {person['id']}
-            group.update(sibs)
-            
-            # Add all siblings of siblings to the group
-            to_process = list(group)
-            while to_process:
-                current_id = to_process.pop()
-                current = id_map.get(current_id)
-                if current and 'siblings' in current:
-                    for sib_id in current['siblings']:
-                        if sib_id not in group:
-                            group.add(sib_id)
-                            to_process.append(sib_id)
-            
-            sibling_groups.append(group)
-            processed_ids.update(group)
-    
-    # Second pass: ensure all members of each group are connected to each other
-    for group in sibling_groups:
-        for person_id in group:
-            person = id_map.get(person_id)
-            if person:
-                if 'siblings' not in person:
-                    person['siblings'] = []
-                # Add all other group members as siblings
-                for other_id in group:
-                    if other_id != person_id and other_id not in person['siblings']:
-                        person['siblings'].append(other_id)
+        obituary_text = person['obituary_text']
+        first, middle, last, suffix, maiden_name, nickname = extract_obituary_owner(obituary_text)
+        
+        if first and last:
+            logger.info(f"Found obituary owner: {first} {middle or ''} {last}")
+            # Update person's information
+            person['first_name'] = first
+            person['middle_name'] = middle
+            person['last_name'] = last
+            person['suffix'] = suffix
+            person['maiden_name'] = maiden_name
+            person['nickname'] = nickname
+            person['deceased'] = True
+        else:
+            logger.warning(f"Could not determine obituary owner for person with ID {person.get('id', 'unknown')}")
 
     if args.debug:
-        print(json.dumps(all_people, indent=2))
+        print(json.dumps(people, indent=2))
     else:
         # Write back to the original file
         with open(args.input_file, 'w') as f:
-            json.dump(all_people, f, indent=2)
-        logger.info(f"Updated {args.input_file} with {len(all_people)} people")
+            json.dump(people, f, indent=2)
+        logger.info(f"Updated {args.input_file} with {len(people)} people")
 
 if __name__ == "__main__":
     main() 
