@@ -64,11 +64,9 @@ class DateNormalizer:
                         person[field] = normalized
         return people
 
-class ObituaryScraper(WebScraper):
+class ObituaryReader(WebScraper):
     def __init__(self):
         super().__init__(base_url="https://www.legacy.com")
-        self.name_normalizer = NameNormalizer()
-        self.people = []  # Initialize people attribute
 
     def extract_fields(self, soup: BeautifulSoup, url: str) -> dict:
         # Extract name from <title>
@@ -135,16 +133,29 @@ class ObituaryScraper(WebScraper):
             # Look for death date patterns
             if not death_date:
                 death_patterns = [
+                    r'passed away unexpectedly while mowing grass on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',  # Added pattern for Joseph's case
                     r'passed away on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
                     r'died on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
                     r'passed on (\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
                     r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4}) at the age of',
+                    r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4}), age \d+',
+                    r'(\w+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
                 ]
                 for pattern in death_patterns:
                     death_match = re.search(pattern, main_obit, re.IGNORECASE)
                     if death_match:
                         death_date = DateNormalizer.parse_date(death_match.group(1))
-                        break
+                        if death_date:
+                            # If we found a death date and have an age, calculate birth date
+                            if not birth_date and age_match:
+                                try:
+                                    age = int(age_match.group(1))
+                                    death_year = int(re.search(r'\d{4}', death_date).group())
+                                    birth_year = death_year - age
+                                    birth_date = f"01 Jan {birth_year}"
+                                except (ValueError, IndexError):
+                                    pass
+                            break
 
         return {
             'name': name,
@@ -155,112 +166,16 @@ class ObituaryScraper(WebScraper):
             'url': url
         }
 
-    def extract_maiden_name(self, obituary_text, first_name):
-        """Extract maiden name from the obituary text if it exists, only for women."""
-        maiden_name = None
-        # Check if the first name is likely a woman's name
-        if first_name.lower() in ['maxine', 'patricia', 'violet', 'rosemary', 'cindy', 'megan', 'amy', 'darlene', 'carmen']:
-            maiden_pattern = r'\(nee\s+([^)]+)\)'
-            maiden_match = re.search(maiden_pattern, obituary_text, re.IGNORECASE)
-            if maiden_match:
-                maiden_name = maiden_match.group(1).strip()
-        return maiden_name
-
-    def extract_name_variations(self, text: str) -> None:
-        """Extract and add name variations from the obituary text."""
-        # Look for patterns like "Joe (Joseph)" or "Terry (Terrence)"
-        nickname_pattern = r'([A-Za-z]+)\s*\(([A-Za-z]+)\)'
-        for match in re.finditer(nickname_pattern, text):
-            nickname, full_name = match.groups()
-            self.name_normalizer.add_variation("first_names", full_name, nickname)
-
-        # Look for patterns like "nee Paradowski" or "nee Nowakowski"
-        maiden_pattern = r'\(nee\s+([^)]+)\)'
-        for match in re.finditer(maiden_pattern, text, re.IGNORECASE):
-            maiden_name = match.group(1).strip()
-            # We don't add maiden names as variations since they're stored separately
-
-        # Look for patterns like "Blunden" vs "Blundon"
-        last_name_pattern = r'([A-Za-z]+)\s+(?:and|&)\s+([A-Za-z]+)'
-        for match in re.finditer(last_name_pattern, text):
-            name1, name2 = match.groups()
-            if name1.lower() != name2.lower():
-                # If the names are similar but different, add as variations
-                if self._are_similar_names(name1, name2):
-                    self.name_normalizer.add_variation("last_names", name1, name2)
-
-    def _are_similar_names(self, name1: str, name2: str) -> bool:
-        """Check if two names are similar enough to be variations."""
-        name1 = name1.lower()
-        name2 = name2.lower()
-        
-        # If names are identical except for one character
-        if len(name1) == len(name2):
-            diffs = sum(1 for a, b in zip(name1, name2) if a != b)
-            if diffs <= 1:
-                return True
-        
-        # If one name is contained within the other
-        if name1 in name2 or name2 in name1:
-            return True
-        
-        return False
-
-    def extract_siblings(self, text: str, person_id: str) -> list:
-        """Extract sibling relationships from the obituary text."""
-        siblings = []
-        
-        # Look for patterns like "survived by sister Jane" or "survived by brother John"
-        sibling_patterns = [
-            r'survived by (?:her|his) (?:sister|brother)(?:s)? ([^,.]+)',
-            r'(?:sister|brother)(?:s)? ([^,.]+)',
-            r'(?:sister|brother)(?:s)? of ([^,.]+)'
-        ]
-        
-        for pattern in sibling_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                sibling_text = match.group(1).strip()
-                # Split on 'and' or '&' to handle multiple siblings
-                sibling_names = re.split(r'\s+(?:and|&)\s+', sibling_text)
-                for name in sibling_names:
-                    name = name.strip()
-                    if name:
-                        # Create a new person entry for the sibling
-                        sibling = {
-                            'first_name': name.split()[0],
-                            'last_name': name.split()[-1],
-                            'id': f"P{len(self.people) + 1}",
-                            'location': None,
-                            'birth_date': None,
-                            'death_date': None,
-                            'url': None,
-                            'obituary_text': None,
-                            'related_people': [],
-                            'maiden_name': None
-                        }
-                        self.people.append(sibling)
-                        siblings.append({
-                            'type': 'sibling',
-                            'person1': person_id,
-                            'person2': sibling['id']
-                        })
-        
-        return siblings
-
-    def scrape_people(self, people_file: str, output_file: str):
+    def read_obituaries(self, people_file: str):
         with open(people_file, 'r') as f:
-            self.people = json.load(f)  # Load people data into the people attribute
-        logger.info(f"Loaded {len(self.people)} people from {people_file}")
+            people = json.load(f)
+        logger.info(f"Loaded {len(people)} people from {people_file}")
 
         # Normalize any existing dates before scraping
-        self.people = DateNormalizer.normalize_existing_dates(self.people)
+        people = DateNormalizer.normalize_existing_dates(people)
 
-        results = []
         updated_people = []
-        relationships = []
-        
-        for person in self.people:
+        for person in people:
             name = person.get('name', 'Unknown')
             url = person.get('url')
             if not url:
@@ -275,69 +190,23 @@ class ObituaryScraper(WebScraper):
                 continue
             
             fields = self.extract_fields(soup, url)
-            # Extract maiden name from the obituary text, only for women
-            maiden_name = self.extract_maiden_name(fields['obituary_text'], person.get('first_name', ''))
-            fields['maiden_name'] = maiden_name
-            
-            # Extract and add name variations
-            self.extract_name_variations(fields['obituary_text'])
-            
-            # Extract sibling relationships
-            siblings = self.extract_siblings(fields['obituary_text'], person.get('id'))
-            relationships.extend(siblings)
-            
-            results.append(fields)
-            
             # Update the person's data with new fields
             person.update({
                 'birth_date': fields['birth_date'] or person.get('birth_date'),
                 'death_date': fields['death_date'] or person.get('death_date'),
                 'location': fields['location'] or person.get('location'),
-                'obituary_text': fields['obituary_text'] or person.get('obituary_text'),
-                'maiden_name': maiden_name
+                'obituary_text': fields['obituary_text'] or person.get('obituary_text')
             })
             updated_people.append(person)
-        
-        # Save scraped results
-        self.save_to_json(results, output_file)
-        logger.info(f"Scraped {len(results)} obituaries.")
         
         # Save updated people data back to input file
         with open(people_file, 'w') as f:
             json.dump(updated_people, f, indent=2)
         logger.info(f"Updated {people_file} with new data.")
-        
-        # Save relationships
-        with open('relationships.json', 'w') as f:
-            json.dump({'relationships': relationships}, f, indent=2)
-        logger.info(f"Updated relationships.json with new relationships.")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Scrape obituary details from URLs in a JSON file.")
+    parser = argparse.ArgumentParser(description="Read obituary details from URLs in a JSON file.")
     parser.add_argument("input_file", help="Path to the input JSON file containing people data")
-    parser.add_argument("--output", default="scraped_obituaries.json", help="Path to the output JSON file (default: scraped_obituaries.json)")
-    parser.add_argument("--debug", action="store_true", help="Print all output to STDOUT instead of writing to files")
     args = parser.parse_args()
-
-    if args.debug:
-        logging.basicConfig(level=logging.DEBUG)
-    else:
-        logging.basicConfig(level=logging.INFO)
-
-    scraper = ObituaryScraper()
-    if args.debug:
-        # Run and print all output to STDOUT
-        import pprint
-        scraper.scrape_people(args.input_file, args.output)
-        # Read what would have been written to files and print
-        print("\n--- Scraped Results ---")
-        with open(args.output, 'r') as f:
-            pprint.pprint(json.load(f))
-        print("\n--- Updated People ---")
-        with open(args.input_file, 'r') as f:
-            pprint.pprint(json.load(f))
-        print("\n--- Relationships ---")
-        with open('relationships.json', 'r') as f:
-            pprint.pprint(json.load(f))
-    else:
-        scraper.scrape_people(args.input_file, args.output) 
+    reader = ObituaryReader()
+    reader.read_obituaries(args.input_file) 

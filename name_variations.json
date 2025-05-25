@@ -1,0 +1,110 @@
+{
+  "name_variations": {
+    "first_names": {
+      "joseph": {
+        "canonical": "Joseph",
+        "variations": [
+          "Joe",
+          "Joey"
+        ]
+      },
+      "terrence": {
+        "canonical": "Terrence",
+        "variations": [
+          "Terry",
+          "Ter"
+        ]
+      },
+      "patricia": {
+        "canonical": "Patricia",
+        "variations": [
+          "Patsy",
+          "Pat",
+          "Trish"
+        ]
+      },
+      "maxine": {
+        "canonical": "Maxine",
+        "variations": [
+          "Max"
+        ]
+      },
+      "rosemary": {
+        "canonical": "Rosemary",
+        "variations": [
+          "Joseph",
+          "Rose",
+          "Rosie"
+        ]
+      },
+      "steve": {
+        "canonical": "Steve",
+        "variations": [
+          "Patricia",
+          "Stephen",
+          "Steven"
+        ]
+      },
+      "donna": {
+        "canonical": "Donna",
+        "variations": [
+          "Reginald"
+        ]
+      },
+      "terry": {
+        "canonical": "Terry",
+        "variations": [
+          "Maxine"
+        ]
+      },
+      "michael": {
+        "canonical": "Michael",
+        "variations": [
+          "Cindy"
+        ]
+      },
+      "ross": {
+        "canonical": "Ross",
+        "variations": [
+          "Megan"
+        ]
+      },
+      "amy": {
+        "canonical": "Amy",
+        "variations": [
+          "Ryan"
+        ]
+      },
+      "darlene": {
+        "canonical": "Darlene",
+        "variations": [
+          "Steve"
+        ]
+      }
+    },
+    "last_names": {
+      "paradowski": {
+        "canonical": "Paradowski",
+        "variations": []
+      },
+      "kaczmarowski": {
+        "canonical": "Kaczmarowski",
+        "variations": []
+      },
+      "dompke": {
+        "canonical": "Dompke",
+        "variations": []
+      },
+      "blundon": {
+        "canonical": "Blundon",
+        "variations": [
+          "Blunden"
+        ]
+      },
+      "nowakowski": {
+        "canonical": "Nowakowski",
+        "variations": []
+      }
+    }
+  }
+}
