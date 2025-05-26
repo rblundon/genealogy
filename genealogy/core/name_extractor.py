@@ -1,6 +1,98 @@
+"""
+NameExtractor: A class for extracting and cleaning names from obituary text.
+"""
+
 import re
+from typing import Dict, Any, Optional, Tuple
+from bs4 import BeautifulSoup
 
 class NameExtractor:
+    def __init__(self):
+        """Initialize the NameExtractor."""
+        pass
+
+    def clean_name(self, name: str) -> str:
+        """Clean a name by removing artifacts and standardizing format."""
+        if not name:
+            return ""
+            
+        # Remove "Obituary" and year
+        name = re.sub(r'\s*Obituary\s*(?:\(\d{4}\))?', '', name)
+        
+        # Remove parentheses and their contents (including née)
+        name = re.sub(r'\([^)]*\)', '', name)
+        
+        # Remove nicknames in quotes
+        name = re.sub(r'"[^"]*"', '', name)
+        
+        # Remove common titles at the start
+        name = re.sub(r'^(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.)\s+', '', name, flags=re.IGNORECASE)
+        
+        # Remove common titles elsewhere
+        name = re.sub(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.)\b', '', name, flags=re.IGNORECASE)
+        
+        # Remove location suffixes
+        name = re.sub(r'\s*-\s*.*$', '', name)
+        name = re.sub(r'\s*\|.*$', '', name)
+        
+        # Remove extra whitespace
+        name = ' '.join(name.split())
+        
+        return name.strip()
+
+    def extract_from_title(self, soup: BeautifulSoup) -> Tuple[Optional[str], Optional[str]]:
+        """Extract name and location from page title."""
+        if not soup:
+            return None, None
+            
+        title = soup.find('title')
+        if not title:
+            return None, None
+            
+        title_text = title.get_text().strip()
+        
+        # Try different title patterns
+        patterns = [
+            # Standard obituary format
+            r'^(.*?)\s+Obituary\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$',
+            # Memorial format
+            r'^(.*?)\s+Memorial\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$',
+            # Simple format
+            r'^(.*?)\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, title_text, re.IGNORECASE)
+            if match:
+                name = self.clean_name(match.group(1))
+                location = match.group(2).strip()
+                return name, location
+                
+        return None, None
+
+    def extract_full_name(self, soup: BeautifulSoup, text: str) -> Optional[str]:
+        """Extract full name from obituary text."""
+        if not text:
+            return None
+            
+        # Try to find name in first paragraph
+        first_para = next((p.get_text() for p in soup.find_all(['p', 'div']) if p.get_text().strip()), '')
+        
+        # Look for patterns like "John Smith passed away" or "John Smith died"
+        patterns = [
+            r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\s+(?:passed away|died|was born|passed on|left us)',
+            r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\'s\s+(?:obituary|memorial|tribute)',
+            r'^(?:In Memory of|In Loving Memory of|Remembering)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\s+(?:passed|died|was born)'
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, first_para, re.IGNORECASE)
+            if match:
+                return self.clean_name(match.group(1))
+                
+        return None
+
     @staticmethod
     def extract_name_components(text: str) -> dict:
         """Extract first, last, middle names, suffix, and nickname from the given text."""

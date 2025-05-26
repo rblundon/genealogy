@@ -9,7 +9,38 @@ import re
 from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
 from genealogy.patterns import NAME_PATTERNS, RELATIONSHIP_PATTERNS
+from .name_extractor import NameExtractor
 import logging
+
+# PATCH: Add a local RELATIONSHIP_PATTERNS with improved sibling pattern
+RELATIONSHIP_PATTERNS = {
+    'spouse': [
+        r'(?:married to|spouse|husband|wife|partner)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*(?:\([^)]*\))?\s*(?:"[^"]*")?)',
+        r'(?:married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*(?:\([^)]*\))?\s*(?:"[^"]*")?)',
+        r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:beloved\s+)?(?:husband|wife|spouse|partner)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+    ],
+    'parent': [
+        r'(?:son|daughter) of ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:father|mother) was ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:parents|father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:born to|raised by)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+    ],
+    'sibling': [
+        # Capture names up to 'and', ',', or sentence end, but not trailing text
+        r'(?:his|her)?\s*brother\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:and|,|who|that|which|also|$))\s+(?:and|,)\s+(?:sister\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:who|that|which|also|survive|$|\.|,))',
+        r'(?:his|her)?\s*sister\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:and|,|who|that|which|also|$))\s+(?:and|,)\s+(?:brother\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:who|that|which|also|survive|$|\.|,))',
+        r'(?:his|her)?\s*brother\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:and|,|who|that|which|also|survive|$|\.|,))',
+        r'(?:his|her)?\s*sister\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*?)(?=\s+(?:and|,|who|that|which|also|survive|$|\.|,))',
+        r'(?:siblings include|survived by siblings)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:brothers|sisters|siblings)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+    ],
+    'child': [
+        r'(?:children include|survived by children)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:children|sons|daughters)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:children|sons|daughters)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:and|,)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+    ],
+}
 
 class PeopleFinder:
     def __init__(self):
@@ -18,18 +49,7 @@ class PeopleFinder:
         self.relationships = set()
         self.maiden_names = set()
         self.nicknames = set()
-
-    def clean_name(self, name: str) -> str:
-        """Clean a name by removing parentheses, nicknames, and extra whitespace."""
-        # Remove parentheses and their contents
-        name = re.sub(r'\([^)]*\)', '', name)
-        # Remove nicknames in quotes
-        name = re.sub(r'"[^"]*"', '', name)
-        # Remove common titles
-        name = re.sub(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.)\b', '', name)
-        # Remove extra whitespace
-        name = ' '.join(name.split())
-        return name.strip()
+        self.name_extractor = NameExtractor()
 
     def extract_maiden_name(self, name: str) -> Optional[str]:
         """Extract maiden name from a name string."""
@@ -103,8 +123,8 @@ class PeopleFinder:
             maiden_name = self.extract_maiden_name(deceased_name)
             nickname = self.extract_nickname(deceased_name)
             
-            # Clean up the name
-            clean_name = self.clean_name(deceased_name)
+            # Clean up the name using NameExtractor
+            clean_name = self.name_extractor.clean_name(deceased_name)
             
             results.append({
                 'name': clean_name,
@@ -120,32 +140,35 @@ class PeopleFinder:
             for pattern in rel_patterns:
                 matches = re.finditer(pattern, obituary_text, re.IGNORECASE)
                 for match in matches:
+                    # Debug: print all sibling matches
+                    if rel_type == 'sibling':
+                        print(f"Sibling pattern: {pattern}")
+                        print(f"Sibling match groups: {match.groups()}")
                     # Handle patterns that might capture multiple names
                     names = []
                     for i in range(1, len(match.groups()) + 1):
                         if match.group(i):
                             names.extend(self.split_names(match.group(i)))
-                    
+                    if rel_type == 'sibling':
+                        print(f"Sibling names extracted: {names}")
                     for name in names:
                         # Skip if name is just a preposition or conjunction
                         if name.lower() in ['to', 'and', 'or', 'but', 'with']:
                             continue
-                            
+                        # Filter out phrases that are not likely to be names
+                        if not re.match(r'^[A-Z][a-z]+(\s+[A-Z][a-z]+)+$', name.strip()):
+                            continue
                         # Extract maiden name and nickname
                         maiden_name = self.extract_maiden_name(name)
                         nickname = self.extract_nickname(name)
-                        
-                        # Clean up the name
-                        clean_name = self.clean_name(name)
-                        
+                        # Clean up the name using NameExtractor
+                        clean_name = self.name_extractor.clean_name(name)
                         # Skip if we've seen this name before (unless it's a duplicate with a suffix like Jr.)
                         if clean_name.lower() in seen_names and not re.search(r'\b(Jr\.|Sr\.|III|IV|V)\b', clean_name):
                             continue
-                            
                         # Skip if this is the deceased's name
                         if deceased_name and clean_name.lower() == deceased_name.lower():
                             continue
-                            
                         results.append({
                             'name': clean_name,
                             'relationship': rel_type,

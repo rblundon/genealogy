@@ -14,6 +14,8 @@ import requests
 from bs4 import BeautifulSoup
 from urllib.parse import urlparse
 from .date_normalizer import DateNormalizer
+from .name_extractor import NameExtractor
+from .obituary_utils import read_obituary
 from ..patterns import NAME_PATTERNS
 
 class ObituaryReader:
@@ -26,6 +28,10 @@ class ObituaryReader:
         self.processed_count = 0
         self.skipped_count = 0
         self.error_count = 0
+        self.name_extractor = NameExtractor()
+        self.headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
 
     def is_valid_url(self, url: str) -> bool:
         """Check if a URL is valid and accessible."""
@@ -50,63 +56,21 @@ class ObituaryReader:
             ])
         )
 
-    def read_obituary(self, url: str) -> Optional[str]:
-        """Read obituary content from a URL."""
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'}
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()
-            soup = BeautifulSoup(response.text, 'html.parser')
-            
-            # Remove script and style elements
-            for script in soup(["script", "style"]):
-                script.decompose()
-                
-            # Get text content
-            text = soup.get_text(separator=' ', strip=True)
-            
-            # Clean up text
-            text = re.sub(r'\s+', ' ', text)
-            return text
-        except Exception as e:
-            logging.error(f"Error reading obituary from {url}: {str(e)}")
-            return None
-
-    def extract_name_from_text(self, text: str) -> Optional[str]:
-        """Extract name from obituary text."""
-        # Try to find name from title pattern
-        title_match = re.search(NAME_PATTERNS['title'], text)
-        if title_match:
-            return title_match.group(1)
-        
-        # If no title match, try to find name at the start of the text
-        first_line = text.split('\n')[0]
-        name_match = re.search(r'^([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)', first_line)
-        if name_match:
-            return name_match.group(1)
-        
-        return None
-
-    def extract_location_from_text(self, text: str) -> Optional[str]:
-        """Extract location from obituary text."""
-        location_match = re.search(NAME_PATTERNS['location'], text)
-        if location_match:
-            return location_match.group(1).strip()
-        return None
-
-    def extract_fields(self, text: str) -> Dict[str, Any]:
+    def extract_fields(self, text: str, soup: Optional[BeautifulSoup] = None) -> Dict[str, Any]:
         """Extract relevant fields from obituary text."""
         fields = {}
         
-        # Extract name
-        name = self.extract_name_from_text(text)
-        if name:
-            fields['name'] = name
-        
-        # Extract location
-        location = self.extract_location_from_text(text)
-        if location:
-            fields['location'] = location
+        # Extract name and location using NameExtractor if soup is provided
+        if soup:
+            name, location = self.name_extractor.extract_from_title(soup)
+            if name:
+                fields['name'] = name
+            if location:
+                fields['location'] = location
+            elif not name:
+                name = self.name_extractor.extract_full_name(soup, text)
+                if name:
+                    fields['name'] = name
         
         # Extract death date
         death_date = DateNormalizer.find_death_date(text)
@@ -143,15 +107,18 @@ class ObituaryReader:
                 return person
 
         # Read and process obituary
-        text = self.read_obituary(url)
+        text = read_obituary(url, self.headers)
         if not text:
             logging.error(f"Failed to read obituary for {person.get('name', 'Unknown')} (ID: {person.get('id', 'N/A')})")
             self.error_count += 1
             return person
 
+        # Get BeautifulSoup object for name extraction
+        soup = BeautifulSoup(text, 'html.parser')
+
         # Update person with new information
         person['obituary_text'] = text
-        fields = self.extract_fields(text)
+        fields = self.extract_fields(text, soup)
         person.update(fields)
         
         # Generate ID if not present
