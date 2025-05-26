@@ -6,13 +6,14 @@ import logging
 import requests
 from bs4 import BeautifulSoup
 import re
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List, Dict
 import os
 from genealogy.core.patterns import (
     DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS, 
     LOCATION_PATTERNS, NAME_PATTERNS, GENDER_PATTERNS
 )
 from genealogy.core.name_extractor import NameExtractor
+import json
 
 # Global counter for GEDCOM-style IDs
 _last_individual_id = 0
@@ -28,7 +29,6 @@ def initialize_individual_id_counter(input_file: str):
     if not os.path.exists(input_file):
         return
     try:
-        import json
         with open(input_file, 'r') as f:
             data = json.load(f)
         max_id = 0
@@ -44,6 +44,28 @@ def initialize_individual_id_counter(input_file: str):
         _last_individual_id = max_id
     except Exception as e:
         logging.warning(f"Could not initialize individual ID counter: {e}")
+
+def link_people(people: List[Dict], person1_id: str, person2_id: str, field: str) -> None:
+    """
+    Create bi-directional links between two people in the specified field.
+    
+    Args:
+        people: List of all people dictionaries
+        person1_id: ID of the first person
+        person2_id: ID of the second person
+        field: The field to link (e.g., 'spouse', 'companion')
+    """
+    # Find both people in the list
+    person1 = next((p for p in people if p.get('id') == person1_id), None)
+    person2 = next((p for p in people if p.get('id') == person2_id), None)
+    
+    if person1 and person2:
+        # Set the links in both directions
+        person1[field] = person2_id
+        person2[field] = person1_id
+        logging.info(f"Linked {person1.get('full_name')} and {person2.get('full_name')} as {field}s")
+    else:
+        logging.warning(f"Could not link people: {person1_id} and {person2_id} - one or both not found")
 
 def extract_location_from_text(text: str) -> Optional[str]:
     for pattern in NAME_PATTERNS['location']:
@@ -172,3 +194,63 @@ def read_obituary(url: str, headers: Optional[dict] = None) -> Tuple[Optional[st
     except Exception as e:
         logging.error(f"Error reading obituary from {url}: {str(e)}")
         return None, None, None 
+
+def add_to_input_file(name: str, input_file: str) -> None:
+    """
+    Add a matched name to the input file.
+    
+    Args:
+        name: The name to add
+        input_file: The path to the input file
+    """
+    logging.info(f"Attempting to add name '{name}' to input file: {input_file}")
+    try:
+        # Read existing data
+        data = []
+        if os.path.exists(input_file):
+            try:
+                with open(input_file, 'r') as f:
+                    data = json.load(f)
+                    logging.info(f"Current data in input file: {data}")
+            except json.JSONDecodeError as e:
+                logging.error(f"Error reading JSON from {input_file}: {e}")
+                return
+            except Exception as e:
+                logging.error(f"Error reading file {input_file}: {e}")
+                return
+        
+        # Check if the name is already in the file
+        if not any(person.get('full_name') == name for person in data):
+            # Add a new entry with additional fields
+            new_entry = {
+                'full_name': name,
+                'id': get_next_individual_id(),
+                'location': None,
+                'obituary_text': None,
+                'birth_date': None,
+                'death_date': None,
+                'age': None,
+                'gender': None,
+                'spouse': None,
+                'companion': None
+            }
+            data.append(new_entry)
+            print(f"\nAdding new entry to {input_file}:")
+            print(json.dumps(new_entry, indent=2))
+            logging.info(f"Added new entry for '{name}' to input file.")
+            
+            # Write the updated data back to the file
+            try:
+                with open(input_file, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    f.flush()  # Ensure data is written to disk
+                    os.fsync(f.fileno())  # Force system to write to disk
+                logging.info(f"Successfully wrote data to {input_file}")
+            except Exception as e:
+                logging.error(f"Error writing to file {input_file}: {e}")
+                return
+        else:
+            logging.info(f"Name '{name}' already exists in the input file.")
+            
+    except Exception as e:
+        logging.error(f"Error adding name to input file: {str(e)}") 

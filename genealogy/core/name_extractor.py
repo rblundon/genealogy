@@ -22,9 +22,6 @@ class NameExtractor:
         name = re.sub(r'\s*Obituary\s*(?:\(\d{4}\))?', '', name)
         name = re.sub(r'\s*Memorial\s*(?:\(\d{4}\))?', '', name)
         
-        # Remove parentheses and their contents (including née)
-        name = re.sub(r'\([^)]*\)', '', name)
-        
         # Remove nicknames in quotes
         name = re.sub(r'"[^"]*"', '', name)
         name = re.sub(r"'[^']*'", '', name)
@@ -39,7 +36,17 @@ class NameExtractor:
         name = re.sub(r'\s*-\s*.*$', '', name)
         name = re.sub(r'\s*\|.*$', '', name)
         
-        # Remove extra whitespace
+        # Handle parentheses - only remove if they contain nicknames or titles
+        name = re.sub(r'\([^)]*(?:nickname|aka|also known as)[^)]*\)', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\([^)]*(?:Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.|Sir|Lady|Dame)[^)]*\)', '', name, flags=re.IGNORECASE)
+        
+        # Remove trailing conjunctions
+        name = re.sub(r'\s+(?:and|or|but|with|,)\s*$', '', name, flags=re.IGNORECASE)
+        
+        # Remove all parentheses and their contents, except for (nee ...)
+        name = re.sub(r'\((?!nee)[^)]*\)', '', name, flags=re.IGNORECASE)
+        
+        # Remove extra whitespace (after all cleaning)
         name = ' '.join(name.split())
         
         cleaned_name = name.strip()

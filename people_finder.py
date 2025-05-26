@@ -5,6 +5,7 @@ from common_classes import NameWeighting
 from name_normalizer import NameNormalizer
 import gender_guesser.detector as gender
 from typing import List, Tuple, Optional, Dict, Any
+from genealogy.core.patterns import SPOUSE_PATTERNS
 
 import logging
 logging.basicConfig(level=logging.INFO)
@@ -16,13 +17,9 @@ def extract_spouses_and_companions(obituary_text, current_last_name=None):
     Returns a list of (name, relationship, maiden_name) tuples.
     """
     results = set()
-    # Suffix pattern for names
-    suffix_regex = r'(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))'
-    # Middle name/initial pattern
-    middle_regex = r'(?: [A-Z](?:\.|[a-z]+)?)?'
-
+    
     # First, check for maiden name in the format "Last, First M. (NEE Maiden)"
-    maiden_pattern = re.compile(r'([A-Z][a-z]+),\s+([A-Z][a-z]+)' + middle_regex + r'(?:{suffix_regex})?\s*\(NEE\s+([^)]+)\)', re.IGNORECASE)
+    maiden_pattern = re.compile(r'([A-Z][a-z]+),\s+([A-Z][a-z]+)(?: [A-Z](?:\.|[a-z]+)?)?(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?\s*\(NEE\s+([^)]+)\)', re.IGNORECASE)
     maiden_match = maiden_pattern.search(obituary_text)
     if maiden_match:
         last_name = maiden_match.group(1)
@@ -43,33 +40,11 @@ def extract_spouses_and_companions(obituary_text, current_last_name=None):
         results.add((full_name, 'self', maiden_name))
         current_last_name = last_name
 
-    # Spouse/companion patterns (now with optional middle name/initial)
-    spouse_patterns = [
-        # Pattern for NEE format in parentheses
-        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(NEE ([^)]+)\)', 'spouse'),
-        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(nee ([^)]+)\)', 'spouse'),
-        # Original patterns
-        (rf'beloved (?:wife|husband|spouse) of ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:married to|married) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:companion of|companion|partner of|partner) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'companion'),
-        (rf'([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? \(companion\)(?: \(nee ([^)]+)\))?', 'companion'),
-        (rf'Survived by ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?, (?:his|her|their) constant companion(?: \(nee ([^)]+)\))?', 'companion'),
-        # New patterns for better spouse detection
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) of ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})?(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? and (?:their|his|her) children(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex} [A-Z][a-z]+)(?:{suffix_regex})? and family(?: \(nee ([^)]+)\))?', 'spouse'),
-        # Pattern for single name spouses (will use current_last_name)
-        (rf'(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:married to|married) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
-        (rf'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+{middle_regex})(?:{suffix_regex})?(?: and|$)(?: \(nee ([^)]+)\))?', 'spouse'),
-    ]
-    
-    for pattern, relationship in spouse_patterns:
+    # Use the patterns from patterns.py
+    for pattern in SPOUSE_PATTERNS:
         for match in re.finditer(pattern, obituary_text, re.IGNORECASE):
             logger.debug(f"[SPOUSE] Pattern: {pattern}")
-            logger.debug(f"[SPOUSE] Raw match: {match.group(0)} | Groups: {match.groups()} | Relationship: {relationship}")
+            logger.debug(f"[SPOUSE] Raw match: {match.group(0)} | Groups: {match.groups()}")
             name = match.group(1)
             suffix = match.group(2) if len(match.groups()) > 1 else None
             maiden_name = match.group(3) if len(match.groups()) > 2 else None
@@ -95,6 +70,11 @@ def extract_spouses_and_companions(obituary_text, current_last_name=None):
             
             # Only consider if at least two words (likely a name)
             if len(clean.split()) >= 2:
+                # Determine relationship type based on pattern
+                if 'companion' in pattern.lower():
+                    relationship = 'companion'
+                else:
+                    relationship = 'spouse'
                 results.add((clean, relationship, maiden_name))
     return list(results)
 
