@@ -1,6 +1,7 @@
 import re
 from typing import List, Optional, Tuple
 from .patterns import SPOUSE_PATTERNS
+from .text_processor import TextProcessor
 import logging
 
 def extract_spouses_and_companions(text: str, current_last_name: Optional[str] = None) -> List[Tuple[str, str, str]]:
@@ -14,37 +15,16 @@ def extract_spouses_and_companions(text: str, current_last_name: Optional[str] =
     Returns:
         List of tuples (name, relationship_type, confidence)
     """
+    processor = TextProcessor()
+    processed_sentences = processor.process_text(text, current_last_name)
+    
+    # Collect all relationships
     relationships = []
-    companion_found = False
+    for sentence in processed_sentences:
+        relationships.extend(sentence.relationships)
     
-    # Extract spouse and companion relationships
-    for pattern in SPOUSE_PATTERNS:
-        matches = re.finditer(pattern, text, re.IGNORECASE)
-        for match in matches:
-            if match.groups():
-                name = match.group(1).strip()
-                # Skip if the name matches the current_last_name or contains specific phrases
-                if current_last_name and name.endswith(current_last_name) or re.search(r'\b(husband|wife) of\b', name, re.IGNORECASE):
-                    continue
-                # Handle conjunctions by splitting the name
-                names = re.split(r'\s+(?:and|or|but|with)\s+', name, flags=re.IGNORECASE)
-                for single_name in names:
-                    single_name = single_name.strip()
-                    if single_name:
-                        # Infer last name if only a first name is present
-                        if ' ' not in single_name and current_last_name:
-                            single_name = f"{single_name} {current_last_name}"
-                        # Skip if the inferred name matches the current_last_name or contains specific phrases
-                        if current_last_name and single_name.endswith(current_last_name) or re.search(r'\b(husband|wife) of\b', single_name, re.IGNORECASE):
-                            continue
-                        # Determine relationship type based on pattern content
-                        if 'companion' in pattern.lower():
-                            relationships.append((single_name, 'companion', 'high'))
-                            companion_found = True
-                        else:
-                            relationships.append((single_name, 'spouse', 'high'))
-    
-    # If a companion is found, remove any spouse relationships
+    # Handle companion logic
+    companion_found = any(rel[1] == 'companion' for rel in relationships)
     if companion_found:
         relationships = [rel for rel in relationships if rel[1] != 'spouse']
     
