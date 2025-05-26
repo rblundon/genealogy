@@ -18,20 +18,11 @@ class ObituaryCatalog:
     def __init__(self):
         self.people: List[Dict[str, Any]] = []
         self.last_processed_date: Optional[datetime] = None
+        self.catalog = {}
 
     def add_people(self, people: List[Dict[str, Any]]):
         """Add people to the catalog."""
         self.people.extend(people)
-
-    def get_death_date(self, person: Dict[str, Any]) -> datetime:
-        """Extract and parse death date from a person record."""
-        death_date = person.get('death_date')
-        if not death_date:
-            return datetime.max  # Put entries without death dates at the end
-        try:
-            return datetime.strptime(death_date, '%d %b %Y')
-        except ValueError:
-            return datetime.max  # Put entries with invalid dates at the end
 
     def get_death_date_key(self, person: Dict[str, Any]) -> tuple:
         """Return a tuple for sorting: (has_death_date, date or min/max)."""
@@ -81,6 +72,17 @@ class ObituaryCatalog:
             if person.get('id') == person_id:
                 person['last_processed'] = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                 break
+
+    def update_catalog(self, people: List[Dict[str, Any]]) -> None:
+        """Update the catalog with new people data."""
+        for person in people:
+            if person.get('id') and person.get('name'):
+                self.catalog[person['id']] = {
+                    'name': person['name'],
+                    'url': person.get('url'),
+                    'death_date': person.get('death_date'),
+                    'location': person.get('location')
+                }
 
     def save_catalog(self, filename: str):
         """Save the catalog to a file using atomic write."""
