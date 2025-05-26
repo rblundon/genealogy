@@ -8,6 +8,11 @@ from bs4 import BeautifulSoup
 import re
 from typing import Optional, Tuple
 import os
+from genealogy.core.patterns import (
+    DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS, 
+    LOCATION_PATTERNS, NAME_PATTERNS, GENDER_PATTERNS
+)
+from genealogy.core.name_extractor import NameExtractor
 
 # Global counter for GEDCOM-style IDs
 _last_individual_id = 0
@@ -40,17 +45,8 @@ def initialize_individual_id_counter(input_file: str):
     except Exception as e:
         logging.warning(f"Could not initialize individual ID counter: {e}")
 
-# Patterns for extracting locations from obituary text
-LOCATION_PATTERNS = [
-    r"(?:at|in) ([A-Z][a-zA-Z .'-]+,? [A-Z]{2,})",  # at/in City, State
-    r"(?:at|in) ([A-Z][a-zA-Z .'-]+)",             # at/in City or Place
-    r"of ([A-Z][a-zA-Z .'-]+,? [A-Z]{2,})",        # of City, State
-    r"of ([A-Z][a-zA-Z .'-]+)",                    # of City or Place
-    r"([A-Z][a-zA-Z .'-]+, [A-Z]{2,})",            # City, State
-]
-
 def extract_location_from_text(text: str) -> Optional[str]:
-    for pattern in LOCATION_PATTERNS:
+    for pattern in NAME_PATTERNS['location']:
         match = re.search(pattern, text)
         if match:
             location = match.group(1).strip()
@@ -142,17 +138,15 @@ def read_obituary(url: str, headers: Optional[dict] = None) -> Tuple[Optional[st
         else:
             text = main_content.get_text(separator=' ', strip=True)
             
-        # If we don't have a name yet, try to extract it from the first line
+        # If we don't have a name yet, use NameExtractor to extract it from the text
         if not full_name:
-            first_line = text.split('\n')[0] if '\n' in text else text.split('.')[0]
-            name_match = re.match(r'^([^,]+)(?:,\s*([^,]+))?(?:\s*\(NEE\s+([^)]+)\))?', first_line)
-            if name_match:
-                last_name = name_match.group(1).strip()
-                first_name = name_match.group(2).strip() if name_match.group(2) else ''
-                maiden_name = name_match.group(3).strip() if name_match.group(3) else ''
-                full_name = f"{first_name} {last_name}".strip()
-                if maiden_name:
-                    full_name += f" (NEE {maiden_name})"
+            name_extractor = NameExtractor()
+            full_name = name_extractor.extract_full_name(soup, text)
+            if not full_name:
+                # As a last resort, try to extract a likely name from the first 200 chars
+                match = re.search(r'([A-Z][a-z]+(?: [A-Z][a-z]+)+)', text[:200])
+                if match:
+                    full_name = match.group(1)
         
         # Remove common meta description patterns
         text = re.sub(r'^.*?(?=died|passed away|reunited with|survived by|born|age)', '', text, flags=re.IGNORECASE | re.DOTALL)
