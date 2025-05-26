@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from .date_normalizer import DateNormalizer
 from .name_extractor import NameExtractor
 from .obituary_utils import read_obituary
-from ..patterns import NAME_PATTERNS
+from genealogy.core.patterns import NAME_PATTERNS
 
 class ObituaryReader:
     def __init__(self, input_file: str, output_file: str, refresh_obits: bool = False):

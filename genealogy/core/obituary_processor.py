@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from genealogy.patterns import DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS, LOCATION_PATTERNS
+from genealogy.core.patterns import DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS, LOCATION_PATTERNS
 from .name_extractor import NameExtractor
 from .obituary_utils import read_obituary, get_next_individual_id, initialize_individual_id_counter
 from .date_normalizer import DateNormalizer
