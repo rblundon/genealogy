@@ -38,13 +38,18 @@ def main():
     parser = argparse.ArgumentParser(description='Process obituary URLs from a JSON file.')
     parser.add_argument('input_file', help='Path to the input JSON file')
     parser.add_argument('--refresh-obits', action='store_true', help='Force refresh of obituary data')
+    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+                      default='INFO', help='Set the logging level')
     args = parser.parse_args()
 
     # Set up logging
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=getattr(logging, args.log_level),
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
+    # Ensure TextProcessor debug logs are visible if requested
+    logging.getLogger('genealogy.core.text_processor').setLevel(getattr(logging, args.log_level))
+
 # Phase 1: Extract the data from the obituary
     # Process the file
     logging.info("Starting obituary processing...")
