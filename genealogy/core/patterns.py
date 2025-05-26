@@ -154,7 +154,11 @@ GENDER_PATTERNS = {
 RELATIONSHIP_PATTERNS = {
     'spouse': [
         r'(?:wife|husband|spouse)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:married to|married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
+        r'(?:married to|married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
+        r'(?:wife|husband|spouse)\s+([A-Z][a-z]+)',  # Single name
+        r'(?:married to|married)\s+([A-Z][a-z]+)',  # Single name
+        r'(?:wife|husband|spouse)\s+([A-Z][a-z]+)\s+(?:\([^)]+\)|\'[^\']+\')',  # Name with nickname
+        r'(?:married to|married)\s+([A-Z][a-z]+)\s+(?:\([^)]+\)|\'[^\']+\')'  # Name with nickname
     ],
     'parent': [
         r'(?:father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
@@ -168,4 +172,43 @@ RELATIONSHIP_PATTERNS = {
         r'(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
         r'(?:father|mother)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
     ]
-} 
+}
+
+# Add spouse_patterns to the patterns.py file
+SPOUSE_PATTERNS = [
+    # Suffix pattern for names
+    r'(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))',
+    # Middle name/initial pattern
+    r'(?: [A-Z](?:\.|[a-z]+)?)?',
+    # Pattern for NEE format in parentheses
+    r'([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? \(NEE ([^)]+)\)',
+    r'([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? \(nee ([^)]+)\)',
+    # Original patterns
+    r'beloved (?:wife|husband|spouse) of ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'(?:married to|married) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'(?:companion of|companion|partner of|partner) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? \(companion\)(?: \(nee ([^)]+)\))?',
+    r'Survived by ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?, (?:his|her|their) constant companion(?: \(nee ([^)]+)\))?',
+    # New patterns for better spouse detection
+    r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) of ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: \(nee ([^)]+)\))?',
+    r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? and (?:their|his|her) children(?: \(nee ([^)]+)\))?',
+    r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? and family(?: \(nee ([^)]+)\))?',
+    # Pattern for single name spouses (will use current_last_name)
+    r'(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)?)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: and|$)(?: \(nee ([^)]+)\))?',
+    r'(?:married to|married) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)?)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: and|$)(?: \(nee ([^)]+)\))?',
+    r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)?)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: and|$)(?: \(nee ([^)]+)\))?',
+    # Add pattern for "reunited with her/his husband/wife"
+    r'reunited with (?:her|his) (?:husband|wife) ([a-z]+)(?:\s+(?:and|,))',
+    # Add pattern for first name only
+    r'reunited with (?:her|his) (?:husband|wife) ([A-Z][a-z]+)',
+    # Enhanced companion patterns
+    r'(?:companion of|companion|partner of|partner)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?',
+    r'([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))? \(companion\)',
+    r'Survived by\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+constant companion',
+    r'(?:survived by|predeceased by)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+(?:constant|longtime|long-time)\s+companion',
+    r'(?:survived by|predeceased by)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+companion\s+(?:and|,)',
+    r'(?:survived by|predeceased by)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+companion\s+(?:of|for)',
+    r"reunited with (?:her|his) (?:husband|wife) ([A-Z][a-z]+)(?:\s+(?:and|,))"
+] 

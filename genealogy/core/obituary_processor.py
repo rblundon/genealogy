@@ -11,11 +11,13 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from genealogy.core.patterns import (
     DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS, 
-    LOCATION_PATTERNS, NAME_PATTERNS, GENDER_PATTERNS
+    LOCATION_PATTERNS, NAME_PATTERNS, GENDER_PATTERNS, SPOUSE_PATTERNS
 )
 from .name_extractor import NameExtractor
-from .obituary_utils import read_obituary, get_next_individual_id, initialize_individual_id_counter
+from .obituary_utils import read_obituary, get_next_individual_id, initialize_individual_id_counter, add_to_input_file
 from .date_normalizer import DateNormalizer
+from .name_parser import NameParser
+from .relationship_extraction import extract_spouses_and_companions  # <-- Import from core module now
 
 class ObituaryProcessor:
     def __init__(self, input_file: Optional[str] = None):
@@ -41,43 +43,31 @@ class ObituaryProcessor:
         female_score = 0
         male_score = 0
 
-        # Log the full text being analyzed for debugging
-        logging.info(f"Analyzing text for gender determination: {text}")
-
         # If any maiden name pattern is found, boost female score
         maiden_name_found = False
         for maiden_pattern in NAME_PATTERNS['maiden_name']:
             if re.search(maiden_pattern, text, re.IGNORECASE):
                 maiden_name_found = True
                 female_score += 5  # Strong weight for maiden name
-                logging.info("Found maiden name pattern in text, boosting female score")
                 break
 
         # Check strong indicators (weight: 3)
         for term in GENDER_PATTERNS['strong_female']:
             if term in text and term not in ['sister', 'sisters']:
                 female_score += 3
-                logging.info(f"Found strong female term: {term}")
         for term in GENDER_PATTERNS['strong_male']:
             if term in text and term not in ['brother', 'brothers']:
                 male_score += 3
-                logging.info(f"Found strong male term: {term}")
 
         # Check regular terms (weight: 1)
         for term in GENDER_PATTERNS['female_terms']:
             if not any(term in strong_term for strong_term in GENDER_PATTERNS['strong_female'] + GENDER_PATTERNS['strong_male']):
                 count = text.count(term)
                 female_score += count
-                if count > 0:
-                    logging.info(f"Found female term: {term} (count: {count})")
         for term in GENDER_PATTERNS['male_terms']:
             if not any(term in strong_term for strong_term in GENDER_PATTERNS['strong_female'] + GENDER_PATTERNS['strong_male']):
                 count = text.count(term)
                 male_score += count
-                if count > 0:
-                    logging.info(f"Found male term: {term} (count: {count})")
-
-        logging.info(f"Gender determination scores - Female: {female_score}, Male: {male_score}")
 
         # If scores are equal, use maiden name as tiebreaker
         if female_score == male_score:
@@ -133,15 +123,29 @@ class ObituaryProcessor:
                 for maiden_pattern in NAME_PATTERNS['maiden_name']:
                     maiden_match = re.search(maiden_pattern, main_text)
                     if maiden_match:
+                        logging.debug(f"Trying maiden pattern: {maiden_pattern}")
+                        logging.debug(f"Matched groups: {maiden_match.groups()} (lastindex: {maiden_match.lastindex})")
                         matched_name = maiden_match.group(1).strip().lower()
                         extracted_name_clean = (extracted_name or '').strip().lower()
                         if matched_name and extracted_name_clean and (matched_name in extracted_name_clean or extracted_name_clean in matched_name):
-                            maiden_name = next((group for group in maiden_match.groups() if group), None)
-                            logging.info(f"Found maiden name '{maiden_name}' for {extracted_name or url}")
+                            # Only assign maiden_name if the group exists and is not None
+                            if maiden_match.lastindex and maiden_match.lastindex <= len(maiden_match.groups()) and maiden_match.group(maiden_match.lastindex):
+                                maiden_name = maiden_match.group(maiden_match.lastindex)
+                            else:
+                                maiden_name = None
+                            logging.debug(f"Extracted maiden_name: {maiden_name}")
                             break
-                else:
-                    logging.info(f"No maiden name found in text for {extracted_name or url}")
-                    logging.debug(f"Text searched: {main_text}")
+            
+            # Find spouse and companion relationships using extract_spouses_and_companions
+            spouse_name = None
+            companion_name = None
+            current_last_name = (extracted_name.split()[-1] if extracted_name and ' ' in extracted_name else None)
+            relationships = extract_spouses_and_companions(main_text, current_last_name)
+            for name, rel, _ in relationships:
+                if rel == 'spouse' and not spouse_name:
+                    spouse_name = name
+                elif rel == 'companion' and not companion_name:
+                    companion_name = name
             
             # Extract birth and death dates using DateNormalizer
             birth_date = DateNormalizer.find_birth_date(main_text)
@@ -171,7 +175,9 @@ class ObituaryProcessor:
                 'birth_date': birth_date,
                 'death_date': death_date,
                 'age': age,
-                'gender': gender
+                'gender': gender,
+                'spouse': spouse_name,
+                'companion': companion_name
             }
             if maiden_name:
                 person['maiden_name'] = maiden_name
@@ -183,7 +189,9 @@ class ObituaryProcessor:
                     'birth_date': birth_date,
                     'death_date': death_date,
                     'age': age,
-                    'gender': gender
+                    'gender': gender,
+                    'spouse': spouse_name,
+                    'companion': companion_name
                 })
                 if maiden_name:
                     self.current_person['maiden_name'] = maiden_name
@@ -202,7 +210,9 @@ class ObituaryProcessor:
                 'birth_date': None,
                 'death_date': None,
                 'age': None,
-                'gender': None
+                'gender': None,
+                'spouse': None,
+                'companion': None
             }
 
     def extract_location(self, text: str) -> Optional[str]:
@@ -216,12 +226,9 @@ class ObituaryProcessor:
             The extracted location or None if not found
         """
         # Look for location patterns
-        logging.info(f"extract_location: searching in text: {text[:200]}...")
         location_match = re.search(r'(?:in|at)\s+([A-Z][a-zA-Z\s]+(?:,\s+[A-Z]{2})?)', text)
         if location_match:
-            logging.info(f"extract_location: matched location: {location_match.group(1).strip()}")
             return location_match.group(1).strip()
-        logging.info("extract_location: no match found")
         return None
         
     def process_file(self, force_refresh: bool = False) -> List[Dict]:

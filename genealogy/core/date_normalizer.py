@@ -6,6 +6,7 @@ import re
 from datetime import datetime
 from typing import Optional, Tuple, List, Dict, Any
 from .patterns import DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS
+import logging
 
 class DateNormalizer:
     # List of common date formats to try
@@ -26,22 +27,22 @@ class DateNormalizer:
     def parse_date(date_str: str) -> Optional[str]:
         """Parse a date string into a standard format."""
         if not date_str:
-            print("parse_date: input is None or empty")
+            logging.debug("parse_date: input is None or empty")
             return None
         # Remove ordinal suffixes (st, nd, rd, th) from day numbers
         date_str = re.sub(r'(\d{1,2})(st|nd|rd|th)', r'\1', date_str)
         # Remove extra whitespace and commas
         date_str = date_str.replace(',', '').strip()
-        print(f"parse_date: trying to parse '{date_str}'")
+        logging.debug(f"parse_date: trying to parse '{date_str}'")
         # Try each date format
         for fmt in DateNormalizer.DATE_FORMATS:
             try:
                 date_obj = datetime.strptime(date_str, fmt)
-                print(f"parse_date: matched format '{fmt}'")
+                logging.debug(f"parse_date: matched format '{fmt}'")
                 return date_obj.strftime('%d %b %Y')
             except ValueError:
                 continue
-        print(f"parse_date: no format matched for '{date_str}'")
+        logging.debug(f"parse_date: no format matched for '{date_str}'")
         return None
 
     @staticmethod
@@ -89,32 +90,30 @@ class DateNormalizer:
     def find_death_date(text: str) -> Optional[str]:
         """Find death date in text."""
         if not text:
-            print("find_death_date: input is None or empty")
+            logging.debug("find_death_date: input is None or empty")
             return None
         for pattern in DEATH_PATTERNS:
-            print(f"find_death_date: trying pattern '{pattern}'")
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 date_str = match.group(1)
-                print(f"find_death_date: matched '{date_str}'")
+                logging.debug(f"find_death_date: matched '{date_str}'")
                 return DateNormalizer.parse_date(date_str)
-        print("find_death_date: no pattern matched")
+        logging.debug("find_death_date: no pattern matched")
         return None
 
     @staticmethod
     def find_birth_date(text: str) -> Optional[str]:
         """Find birth date in text."""
         if not text:
-            print("find_birth_date: input is None or empty")
+            logging.debug("find_birth_date: input is None or empty")
             return None
         for pattern in BIRTH_PATTERNS:
-            print(f"find_birth_date: trying pattern '{pattern}'")
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
                 date_str = match.group(1)
-                print(f"find_birth_date: matched '{date_str}'")
+                logging.debug(f"find_birth_date: matched '{date_str}'")
                 return DateNormalizer.parse_date(date_str)
-        print("find_birth_date: no pattern matched")
+        logging.debug("find_birth_date: no pattern matched")
         return None
 
     @staticmethod
