@@ -8,7 +8,7 @@ from obituary text.
 import re
 from typing import Dict, Any, List, Optional, Set
 from datetime import datetime
-from genealogy.patterns import NAME_PATTERNS, RELATIONSHIP_PATTERNS
+from genealogy.core.patterns import NAME_PATTERNS, RELATIONSHIP_PATTERNS
 from .name_extractor import NameExtractor
 import logging
 

@@ -18,7 +18,7 @@ def main():
         level=logging.INFO,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
-
+# Phase 1: Extract the data from the obituary
     # Process the file
     logging.info("Starting obituary processing...")
     processor = ObituaryProcessor(args.input_file)

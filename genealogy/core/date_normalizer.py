@@ -8,7 +8,7 @@ and calculate dates based on age and death dates.
 from datetime import datetime
 import re
 from typing import Optional, List, Dict, Any
-from genealogy.patterns import DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS
+from genealogy.core.patterns import DEATH_PATTERNS, BIRTH_PATTERNS, AGE_PATTERNS
 import logging
 
 class DateNormalizer:
@@ -29,9 +29,8 @@ class DateNormalizer:
         # List of common date formats to try
         formats = [
             '%d %b %Y',  # 15 Jan 2020
+            '%b %d %Y',  # Jan 15 2020
             '%B %d %Y',  # January 15 2020
-            '%B %d, %Y', # January 15, 2020
-            '%b %d, %Y', # Jan 15, 2020
             '%Y-%m-%d',  # 2020-01-15
             '%m/%d/%Y',  # 01/15/2020
             '%d/%m/%Y',  # 15/01/2020
@@ -59,7 +58,7 @@ class DateNormalizer:
     @staticmethod
     def extract_death_date_and_age(text: str) -> (Optional[str], Optional[int]):
         """Extract both death date and age from text using patterns from patterns.py."""
-        from genealogy.patterns import DEATH_PATTERNS  # Ensure up-to-date import
+        from genealogy.core.patterns import DEATH_PATTERNS  # Ensure up-to-date import
         print(f"DEATH_PATTERNS at runtime: {DEATH_PATTERNS}")
         text = ' '.join(text.split())
         print(f"extract_death_date_and_age input text: {repr(text)}")
@@ -97,14 +96,29 @@ class DateNormalizer:
 
     @staticmethod
     def find_birth_date(text: str) -> Optional[str]:
-        """Find birth date in text using patterns from patterns.py."""
+        """
+        Find birth date in the text.
+        
+        Args:
+            text: The text to search
+            
+        Returns:
+            The birth date if found, None otherwise
+        """
         for pattern in BIRTH_PATTERNS:
+            print(f"Trying birth date pattern: {pattern}")
             match = re.search(pattern, text, re.IGNORECASE)
             if match:
-                for group in match.groups():
-                    parsed = DateNormalizer.parse_date(group)
-                    if parsed:
-                        return parsed
+                print(f"Matched birth date pattern: {pattern} with group: {match.group(1)}")
+                try:
+                    date_str = match.group(1)
+                    # If it's just a year, convert to January 1st of that year
+                    if re.match(r'^\d{4}$', date_str):
+                        date_str = f"01 Jan {date_str}"
+                    return DateNormalizer.parse_date(date_str)
+                except (ValueError, IndexError):
+                    continue
+        print("No birth date pattern matched.")
         return None
 
     @staticmethod
@@ -148,10 +162,16 @@ class DateNormalizer:
         
         # Then try age patterns
         for pattern in AGE_PATTERNS:
-            match = re.search(pattern, text)
+            print(f"Trying age pattern: {pattern}")
+            match = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
             if match:
-                return int(match.group(1))
-            
+                print(f"Matched age pattern: {pattern} with group: {match.group(1)}")
+                try:
+                    age_str = match.group(1)
+                    return int(age_str)
+                except (ValueError, IndexError):
+                    continue
+        print("No age pattern matched.")
         # If no age found, try to calculate from birth and death dates
         birth_date = DateNormalizer.find_birth_date(text)
         death_date = DateNormalizer.find_death_date(text)
@@ -160,7 +180,6 @@ class DateNormalizer:
             if calculated_age is not None:
                 logging.info(f"Calculated age {calculated_age} from birth date {birth_date} and death date {death_date}")
                 return calculated_age
-            
         return None
 
     @staticmethod
