@@ -193,7 +193,7 @@ def read_obituary(url: str, headers: Optional[dict] = None) -> Tuple[Optional[st
         
     except Exception as e:
         logging.error(f"Error reading obituary from {url}: {str(e)}")
-        return None, None, None 
+        return None, None, None
 
 def add_to_input_file(name: str, input_file: str) -> None:
     """

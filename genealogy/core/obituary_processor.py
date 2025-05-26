@@ -18,12 +18,15 @@ from .obituary_utils import read_obituary, get_next_individual_id, initialize_in
 from .date_normalizer import DateNormalizer
 from .name_parser import NameParser
 from .relationship_extraction import extract_spouses_and_companions  # <-- Import from core module now
+from .name_normalizer import NameNormalizer
 
 class ObituaryProcessor:
     def __init__(self, input_file: Optional[str] = None):
         """Initialize the ObituaryProcessor with optional input file path."""
         self.input_file = input_file
         self.name_extractor = NameExtractor()
+        self.name_parser = NameParser()  # Initialize name_parser
+        self.name_normalizer = NameNormalizer()  # Initialize name_normalizer
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
@@ -124,16 +127,22 @@ class ObituaryProcessor:
                     maiden_match = re.search(maiden_pattern, main_text)
                     if maiden_match:
                         logging.debug(f"Trying maiden pattern: {maiden_pattern}")
-                        logging.debug(f"Matched groups: {maiden_match.groups()} (lastindex: {maiden_match.lastindex})")
-                        matched_name = maiden_match.group(1).strip().lower()
-                        extracted_name_clean = (extracted_name or '').strip().lower()
-                        if matched_name and extracted_name_clean and (matched_name in extracted_name_clean or extracted_name_clean in matched_name):
-                            # Only assign maiden_name if the group exists and is not None
-                            if maiden_match.lastindex and maiden_match.lastindex <= len(maiden_match.groups()) and maiden_match.group(maiden_match.lastindex):
-                                maiden_name = maiden_match.group(maiden_match.lastindex)
-                            else:
-                                maiden_name = None
-                            logging.debug(f"Extracted maiden_name: {maiden_name}")
+                        logging.debug(f"Matched groups: {maiden_match.groups()} (type: {type(maiden_match.groups())}), lastindex: {maiden_match.lastindex} (type: {type(maiden_match.lastindex)})")
+                        try:
+                            matched_name = maiden_match.group(1).strip().lower()
+                            extracted_name_clean = (extracted_name or '').strip().lower()
+                            logging.debug(f"matched_name: {matched_name}, extracted_name_clean: {extracted_name_clean}")
+                            if matched_name and extracted_name_clean and (matched_name in extracted_name_clean or extracted_name_clean in matched_name):
+                                # Only assign maiden_name if the group exists and is not None
+                                if maiden_match.lastindex and maiden_match.lastindex <= len(maiden_match.groups()) and maiden_match.group(maiden_match.lastindex):
+                                    maiden_name = maiden_match.group(maiden_match.lastindex)
+                                    logging.debug(f"Extracted maiden_name (by lastindex): {maiden_name}")
+                                else:
+                                    maiden_name = None
+                                break
+                        except Exception as e:
+                            logging.error(f"Error extracting maiden name group: {e}")
+                            maiden_name = None
                             break
             
             # Find spouse and companion relationships using extract_spouses_and_companions
@@ -165,22 +174,72 @@ class ObituaryProcessor:
             location = extracted_location or self.extract_location(main_text)
             logging.info(f"Final location used: '{location}'")
             
+            # Parse the extracted name to handle variations
+            logging.debug(f"About to parse extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
+            if not extracted_name or not isinstance(extracted_name, str):
+                logging.error(f"Invalid extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
+                raise ValueError("extracted_name must be a non-empty string")
+            parsed_name = self.name_parser.parse_name(extracted_name)
+            logging.debug(f"Parsed name result: {parsed_name!r} (type: {type(parsed_name)})")
+            first_name = parsed_name.first_name
+            last_name = parsed_name.last_name
+            middle_name = parsed_name.middle_name
+            middle_names_str = middle_name if middle_name else ''
+            suffix = parsed_name.suffix
+            nickname = parsed_name.nickname
+            maiden_name = parsed_name.maiden_name if hasattr(parsed_name, 'maiden_name') else None
+
+            # Normalize first and last names
+            canonical_first, canonical_last = self.name_normalizer.normalize_name(first_name, last_name)
+
+            # Debug log the values and types before constructing the person dictionary
+            logging.debug(f"canonical_first: {canonical_first!r} (type: {type(canonical_first)})")
+            logging.debug(f"canonical_last: {canonical_last!r} (type: {type(canonical_last)})")
+            logging.debug(f"middle_names_str: {middle_names_str!r} (type: {type(middle_names_str)})")
+            logging.debug(f"suffix: {suffix!r} (type: {type(suffix)})")
+            logging.debug(f"nickname: {nickname!r} (type: {type(nickname)})")
+            logging.debug(f"maiden_name: {maiden_name!r} (type: {type(maiden_name)})")
+
             # Create the person dictionary
-            person = {
-                'url': url,
-                'full_name': extracted_name or '',
-                'location': location or '',
-                'obituary_text': main_text,
-                'id': get_next_individual_id(),
-                'birth_date': birth_date,
-                'death_date': death_date,
-                'age': age,
-                'gender': gender,
-                'spouse': spouse_name,
-                'companion': companion_name
-            }
-            if maiden_name:
-                person['maiden_name'] = maiden_name
+            try:
+                person = {
+                    'url': url,
+                    'full_name': extracted_name or '',
+                    'location': location or '',
+                    'obituary_text': main_text,
+                    'id': get_next_individual_id(),
+                    'birth_date': birth_date,
+                    'death_date': death_date,
+                    'age': age,
+                    'gender': gender,
+                    'spouse': spouse_name,
+                    'companion': companion_name,
+                    'first_name': canonical_first,
+                    'last_name': canonical_last,
+                    'middle_names': middle_names_str,
+                    'suffix': suffix,
+                    'nickname': nickname,
+                    'maiden_name': maiden_name
+                }
+            except Exception as e:
+                logging.error(f"Exception constructing person dictionary: {e}")
+                logging.error(f"url: {url!r} (type: {type(url)})")
+                logging.error(f"extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
+                logging.error(f"location: {location!r} (type: {type(location)})")
+                logging.error(f"main_text: {main_text!r} (type: {type(main_text)})")
+                logging.error(f"birth_date: {birth_date!r} (type: {type(birth_date)})")
+                logging.error(f"death_date: {death_date!r} (type: {type(death_date)})")
+                logging.error(f"age: {age!r} (type: {type(age)})")
+                logging.error(f"gender: {gender!r} (type: {type(gender)})")
+                logging.error(f"spouse_name: {spouse_name!r} (type: {type(spouse_name)})")
+                logging.error(f"companion_name: {companion_name!r} (type: {type(companion_name)})")
+                logging.error(f"canonical_first: {canonical_first!r} (type: {type(canonical_first)})")
+                logging.error(f"canonical_last: {canonical_last!r} (type: {type(canonical_last)})")
+                logging.error(f"middle_names_str: {middle_names_str!r} (type: {type(middle_names_str)})")
+                logging.error(f"suffix: {suffix!r} (type: {type(suffix)})")
+                logging.error(f"nickname: {nickname!r} (type: {type(nickname)})")
+                logging.error(f"maiden_name: {maiden_name!r} (type: {type(maiden_name)})")
+                raise
             
             # If force_refresh is True, update only the fields instead of creating a new person
             if force_refresh and self.current_person:
@@ -200,20 +259,16 @@ class ObituaryProcessor:
             return person
             
         except Exception as e:
-            logging.error(f"Error processing URL {url}: {str(e)}")
-            return {
-                'url': url,
-                'full_name': '',
-                'location': '',
-                'obituary_text': '',
-                'id': get_next_individual_id(),
-                'birth_date': None,
-                'death_date': None,
-                'age': None,
-                'gender': None,
-                'spouse': None,
-                'companion': None
-            }
+            import sys
+            import traceback
+            logging.error(f"Exception in process_url: {e}")
+            exc_type, exc_value, exc_tb = sys.exc_info()
+            tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
+            logging.error(f"Traceback:\\n{tb_str}")
+            # Log all local variables
+            for var_name, var_val in locals().items():
+                logging.error(f"{var_name}: {var_val!r} (type: {type(var_val)})")
+            raise
 
     def extract_location(self, text: str) -> Optional[str]:
         """
@@ -260,6 +315,9 @@ class ObituaryProcessor:
                     if force_refresh and 'id' in item:
                         result['id'] = item['id']
                     results.append(result)
+                else:
+                    # If the item does not have a URL, keep it unchanged
+                    results.append(item)
                     
             # Write results back to the input file
             with open(self.input_file, 'w') as f:

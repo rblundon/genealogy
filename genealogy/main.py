@@ -42,7 +42,7 @@ def main():
 
     # Set up logging
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format='%(asctime)s - %(levelname)s - %(message)s'
     )
 # Phase 1: Extract the data from the obituary
@@ -76,7 +76,7 @@ def main():
                 logging.info("Updating name details and setting as deceased for %s", person['full_name'])
                 person.update({
                     'first_name': parsed_name.first_name,
-                    'middle_name': parsed_name.middle_name,
+                    'middle_name': parsed_name.middle_name if parsed_name.middle_name else '',
                     'last_name': parsed_name.last_name,
                     'nickname': parsed_name.nickname,
                     'suffix': parsed_name.suffix,
@@ -114,7 +114,7 @@ def main():
                             'deceased': False,
                             # Add parsed name fields
                             'first_name': parsed_name.first_name,
-                            'middle_name': parsed_name.middle_name,
+                            'middle_name': parsed_name.middle_name if parsed_name.middle_name else '',
                             'last_name': parsed_name.last_name,
                             'nickname': parsed_name.nickname,
                             'suffix': parsed_name.suffix
