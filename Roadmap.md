@@ -1,4 +1,4 @@
-## Phase 1 - Source data (obituaries)
+## Phase 1 - Source data (obituaries) (Complete)
 
 - Get obit data if has URL but no obit_text
 - Refresh obits

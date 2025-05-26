@@ -214,10 +214,14 @@ class ObituaryReader(WebScraper):
         logger.info(f"Successfully updated {people_file} with new data.")
 
 if __name__ == "__main__":
+    # Phase 1 - Source data (obituaries) (Complete)
     parser = argparse.ArgumentParser(description="Read obituary details from URLs in a JSON file.")
     parser.add_argument("input_file", help="Path to the input JSON file containing people data")
     parser.add_argument("--refresh-obits", action="store_true", 
                        help="Force re-reading of all obituaries with valid URLs")
     args = parser.parse_args()
     reader = ObituaryReader()
-    reader.read_obituaries(args.input_file, args.refresh_obits) 
+    reader.read_obituaries(args.input_file, args.refresh_obits)
+
+    # Phase 2 - Process data (obituaries) (In Progress)
+    
