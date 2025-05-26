@@ -1,34 +1,36 @@
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 from .patterns import SPOUSE_PATTERNS
 from .text_processor import TextProcessor
 import logging
 
-def extract_spouses_and_companions(text: str, current_last_name: Optional[str] = None) -> List[Tuple[str, str, str]]:
+def extract_spouses_and_companions(text: str, current_last_name: str, people: List[Dict], current_person_id: str) -> Tuple[Optional[str], Optional[str]]:
     """
-    Extract spouse and companion relationships from the text.
+    Extract spouse and companion names from text.
     
     Args:
-        text: The text to analyze
-        current_last_name: The last name of the current person (to avoid self-matching)
+        text: The text to process
+        current_last_name: The last name of the current person
+        people: List of all people dictionaries
+        current_person_id: ID of the current person being processed
         
     Returns:
-        List of tuples (name, relationship_type, confidence)
+        Tuple of (spouse_name, companion_name)
     """
-    processor = TextProcessor()
-    processed_sentences = processor.process_text(text, current_last_name)
+    processor = TextProcessor(people, current_person_id)
+    processed_sentences = processor.process_text(text)
     
-    # Collect all relationships
-    relationships = []
+    spouse_name = None
+    companion_name = None
+    
     for sentence in processed_sentences:
-        relationships.extend(sentence.relationships)
-    
-    # Handle companion logic
-    companion_found = any(rel[1] == 'companion' for rel in relationships)
-    if companion_found:
-        relationships = [rel for rel in relationships if rel[1] != 'spouse']
-    
-    return relationships
+        for relationship in sentence.relationships:
+            if relationship['type'] == 'spouse':
+                spouse_name = relationship['name']
+            elif relationship['type'] == 'companion':
+                companion_name = relationship['name']
+                
+    return spouse_name, companion_name
 
 def extract_spouses_and_companions_old(obituary_text: str, current_last_name: Optional[str] = None) -> List[Tuple[str, str, Optional[str]]]:
     """

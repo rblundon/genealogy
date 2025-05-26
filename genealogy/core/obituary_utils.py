@@ -62,10 +62,66 @@ def link_people(people: List[Dict], person1_id: str, person2_id: str, field: str
     if person1 and person2:
         # Set the links in both directions
         person1[field] = person2_id
-        person2[field] = person1_id
         logging.info(f"Linked {person1.get('full_name')} and {person2.get('full_name')} as {field}s")
+        
+        # If the relationship is 'child', also link the parent to the child as 'parent'
+        if field == 'child':
+            person2['parent'] = person1_id
+            logging.info(f"Linked {person2.get('full_name')} as parent of {person1.get('full_name')}")
+        # If the relationship is 'parent', also link the child to the parent as 'child'
+        elif field == 'parent':
+            person2['child'] = person1_id
+            logging.info(f"Linked {person2.get('full_name')} as child of {person1.get('full_name')}")
     else:
         logging.warning(f"Could not link people: {person1_id} and {person2_id} - one or both not found")
+
+def find_or_create_person(people: List[Dict], full_name: str) -> Optional[str]:
+    """
+    Find an existing person or create a new one.
+    
+    Args:
+        people: List of all people dictionaries
+        full_name: The full name of the person
+        
+    Returns:
+        The person's ID if found or created, None if creation failed
+    """
+    # First try to find the person
+    for person in people:
+        if person.get('full_name') == full_name:
+            return person.get('id')
+    
+    # If not found, create a new person
+    try:
+        # Parse the name
+        name_parts = full_name.split()
+        if len(name_parts) < 2:
+            logging.warning(f"Cannot create person with single name: {full_name}")
+            return None
+            
+        new_person = {
+            'id': f"P{len(people) + 1:04d}",
+            'full_name': full_name,
+            'first_name': name_parts[0],
+            'last_name': name_parts[-1],
+            'middle_name': ' '.join(name_parts[1:-1]) if len(name_parts) > 2 else '',
+            'location': None,
+            'birth_date': None,
+            'death_date': None,
+            'url': None,
+            'obituary_text': None,
+            'spouse': None,
+            'companion': None,
+            'deceased': False
+        }
+        
+        people.append(new_person)
+        logging.info(f"Created new person: {full_name} ({new_person['id']})")
+        return new_person['id']
+        
+    except Exception as e:
+        logging.error(f"Error creating new person {full_name}: {str(e)}")
+        return None
 
 def extract_location_from_text(text: str) -> Optional[str]:
     for pattern in NAME_PATTERNS['location']:
