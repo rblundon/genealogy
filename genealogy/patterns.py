@@ -4,16 +4,13 @@ Regex patterns used across the application for extracting information from text.
 
 # Death date patterns
 DEATH_PATTERNS = [
-    r'died on (\d{1,2} [A-Za-z]+,? \d{4})',
-    r'died on ([A-Za-z]+ \d{1,2},? \d{4})',
-    r'passed away on (\d{1,2} [A-Za-z]+,? \d{4})',
-    r'passed away on ([A-Za-z]+ \d{1,2},? \d{4})',
-    r'passed on (\d{1,2} [A-Za-z]+,? \d{4})',
-    r'passed on ([A-Za-z]+ \d{1,2},? \d{4})',
-    r'death on (\d{1,2} [A-Za-z]+,? \d{4})',
-    r'death on ([A-Za-z]+ \d{1,2},? \d{4})',
-    r'(\d{1,2} [A-Za-z]+,? \d{4}) - Death',
-    r'([A-Za-z]+ \d{1,2},? \d{4}) - Death',
+    r'(\w+\s+\d{1,2},?\s*\d{4})\s+at\s+the\s+age\s+of\s+(\d+)\s+years',
+    r'on\s+(\w+\s+\d{1,2},?\s*\d{4})\s+at\s+the\s+age\s+of\s+(\d+)\s+years',
+    r'passed away on\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})',
+    r'passed away.*on\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})',
+    r'died on\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})',
+    r'passed on\s+(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})',
+    r'(\w+\s+\d{1,2}(?:st|nd|rd|th)?,?\s+\d{4})\s+at\s+the\s+age\s+of',
 ]
 
 # Birth date patterns
@@ -22,6 +19,7 @@ BIRTH_PATTERNS = [
     r'born on ([A-Za-z]+ \d{1,2},? \d{4})',
     r'born (\d{1,2} [A-Za-z]+,? \d{4})',
     r'born ([A-Za-z]+ \d{1,2},? \d{4})',
+    r'Born ([A-Za-z]+ \d{1,2}(?:st|nd|rd|th)?,? \d{4})',
     r'birth date: (\d{1,2} [A-Za-z]+,? \d{4})',
     r'birth date: ([A-Za-z]+ \d{1,2},? \d{4})',
     r'(\d{1,2} [A-Za-z]+,? \d{4}) - Birth',
@@ -69,4 +67,13 @@ RELATIONSHIP_PATTERNS = {
         r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:children|sons|daughters)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
         r'(?:children|sons|daughters)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+(?:and|,)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
     ],
-} 
+}
+
+# Add location patterns
+LOCATION_PATTERNS = [
+    r'(?:of|from|in)\s+([A-Z][a-zA-Z\s,]+(?:County|City|State|Province|Country)?)',
+    r'(?:resided|lived|passed away)\s+(?:in|at)\s+([A-Z][a-zA-Z\s,]+)',
+    r'(?:location|place):\s+([A-Z][a-zA-Z\s,]+)',
+    r'(?:funeral home|memorial service|service).*?([A-Z][a-zA-Z\s,]+(?:County|City|State|Province|Country)?)',
+    r'(?:church|chapel).*?([A-Z][a-zA-Z\s,]+(?:County|City|State|Province|Country)?)'
+] 
