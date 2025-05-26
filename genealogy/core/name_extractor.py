@@ -5,6 +5,7 @@ NameExtractor: A class for extracting and cleaning names from obituary text.
 import re
 from typing import Dict, Any, Optional, Tuple
 from bs4 import BeautifulSoup
+import logging
 
 class NameExtractor:
     def __init__(self):
@@ -13,23 +14,26 @@ class NameExtractor:
 
     def clean_name(self, name: str) -> str:
         """Clean a name by removing artifacts and standardizing format."""
+        logging.info(f"Cleaning name: {name}")
         if not name:
             return ""
             
         # Remove "Obituary" and year
         name = re.sub(r'\s*Obituary\s*(?:\(\d{4}\))?', '', name)
+        name = re.sub(r'\s*Memorial\s*(?:\(\d{4}\))?', '', name)
         
         # Remove parentheses and their contents (including née)
         name = re.sub(r'\([^)]*\)', '', name)
         
         # Remove nicknames in quotes
         name = re.sub(r'"[^"]*"', '', name)
+        name = re.sub(r"'[^']*'", '', name)
         
         # Remove common titles at the start
-        name = re.sub(r'^(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.)\s+', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'^(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.|Sir|Lady|Dame)\s+', '', name, flags=re.IGNORECASE)
         
         # Remove common titles elsewhere
-        name = re.sub(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.)\b', '', name, flags=re.IGNORECASE)
+        name = re.sub(r'\b(Mr\.|Mrs\.|Ms\.|Dr\.|Rev\.|Prof\.|Sir|Lady|Dame)\b', '', name, flags=re.IGNORECASE)
         
         # Remove location suffixes
         name = re.sub(r'\s*-\s*.*$', '', name)
@@ -38,7 +42,9 @@ class NameExtractor:
         # Remove extra whitespace
         name = ' '.join(name.split())
         
-        return name.strip()
+        cleaned_name = name.strip()
+        logging.info(f"Cleaned name: {cleaned_name}")
+        return cleaned_name
 
     def extract_from_title(self, soup: BeautifulSoup) -> Tuple[Optional[str], Optional[str]]:
         """Extract name and location from page title."""
@@ -58,17 +64,28 @@ class NameExtractor:
             # Memorial format
             r'^(.*?)\s+Memorial\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$',
             # Simple format
-            r'^(.*?)\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$'
+            r'^(.*?)\s*-\s*([^-]+?)(?:\s*-\s*[^-]+)?$',
+            # Funeral home format
+            r'^(.*?)\s+(?:Obituary|Memorial)\s*-\s*([^-]+?)\s*-\s*[^-]+$',
+            # Location first format
+            r'^([^-]+?)\s*-\s*(.*?)\s+(?:Obituary|Memorial)$'
         ]
         
         for pattern in patterns:
             match = re.search(pattern, title_text, re.IGNORECASE)
             if match:
-                name = self.clean_name(match.group(1))
-                location = match.group(2).strip()
+                # Check which group contains the name
+                if 'Obituary' in match.group(1) or 'Memorial' in match.group(1):
+                    name = self.clean_name(match.group(2))
+                    location = match.group(1).strip()
+                else:
+                    name = self.clean_name(match.group(1))
+                    location = match.group(2).strip()
                 return name, location
                 
-        return None, None
+        # If no pattern matches, try to extract just the name
+        name = self.clean_name(title_text)
+        return name, None
 
     def extract_full_name(self, soup: BeautifulSoup, text: str) -> Optional[str]:
         """Extract full name from obituary text."""
@@ -83,7 +100,13 @@ class NameExtractor:
             r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\s+(?:passed away|died|was born|passed on|left us)',
             r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\'s\s+(?:obituary|memorial|tribute)',
             r'^(?:In Memory of|In Loving Memory of|Remembering)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
-            r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\s+(?:passed|died|was born)'
+            r'^([A-Z][a-zA-Z\s\"\'\(\)\-]+?)\s+(?:passed|died|was born)',
+            r'^(?:The family of|The family announces the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^(?:We announce the passing of|We are sad to announce the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^(?:It is with great sadness that we announce the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^(?:With heavy hearts, we announce the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^(?:We are heartbroken to announce the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)',
+            r'^(?:It is with deep sorrow that we announce the passing of)\s+([A-Z][a-zA-Z\s\"\'\(\)\-]+?)(?:,|\.|$)'
         ]
         
         for pattern in patterns:
@@ -117,9 +140,9 @@ class NameExtractor:
             fields['suffix'] = suffix_match.group(0)
         
         # Check for nickname (e.g., "Joe" in "Joseph 'Joe' Smith")
-        nickname_pattern = r'"([^"]*)"'
+        nickname_pattern = r'"([^"]*)"|\'([^\']*)\''
         nickname_match = re.search(nickname_pattern, text)
         if nickname_match:
-            fields['nickname'] = nickname_match.group(1)
+            fields['nickname'] = nickname_match.group(1) or nickname_match.group(2)
         
         return fields 

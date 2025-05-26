@@ -53,22 +53,23 @@ class PeopleFinder:
 
     def extract_maiden_name(self, name: str) -> Optional[str]:
         """Extract maiden name from a name string."""
-        maiden_match = re.search(NAME_PATTERNS['maiden_name'], name, re.IGNORECASE)
-        if maiden_match:
-            # Try both capture groups since we have two patterns
-            maiden_name = maiden_match.group(1) or maiden_match.group(2)
-            if maiden_name:
-                return maiden_name.strip()
+        for pattern in NAME_PATTERNS['maiden_name']:
+            maiden_match = re.search(pattern, name, re.IGNORECASE)
+            if maiden_match:
+                # Try all capture groups
+                for group in maiden_match.groups():
+                    if group:
+                        return group.strip()
         return None
 
     def extract_nickname(self, name: str) -> Optional[str]:
         """Extract nickname from a name string."""
-        nickname_match = re.search(NAME_PATTERNS['nickname'], name)
-        if nickname_match:
-            # Try both capture groups since we have two patterns
-            nickname = nickname_match.group(1) or nickname_match.group(2)
-            if nickname:
-                return nickname.strip()
+        for pattern in NAME_PATTERNS['nickname']:
+            nickname_match = re.search(pattern, name)
+            if nickname_match:
+                for group in nickname_match.groups():
+                    if group:
+                        return group.strip()
         return None
 
     def split_names(self, text: str) -> List[str]:
@@ -94,11 +95,12 @@ class PeopleFinder:
         # Try to extract deceased's name from title first
         deceased_name = None
         if title:
-            # Use the title pattern from NAME_PATTERNS
-            match = re.search(NAME_PATTERNS['title'], title, re.IGNORECASE)
-            if match:
-                deceased_name = match.group(1).strip()
-                logging.info(f"Deceased name from title: {deceased_name}")
+            for pattern in NAME_PATTERNS['title']:
+                match = re.search(pattern, title, re.IGNORECASE)
+                if match:
+                    deceased_name = match.group(1).strip()
+                    logging.info(f"Deceased name from title: {deceased_name}")
+                    break
 
         # If not found in title, try first paragraph
         if not deceased_name:
@@ -122,10 +124,8 @@ class PeopleFinder:
             # Extract maiden name and nickname
             maiden_name = self.extract_maiden_name(deceased_name)
             nickname = self.extract_nickname(deceased_name)
-            
             # Clean up the name using NameExtractor
             clean_name = self.name_extractor.clean_name(deceased_name)
-            
             results.append({
                 'name': clean_name,
                 'relationship': 'deceased',
