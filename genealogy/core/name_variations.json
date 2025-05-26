@@ -19,8 +19,7 @@
         "canonical": "Patricia",
         "variations": [
           "Patsy",
-          "Pat",
-          "Trish"
+          "Pat"
         ]
       },
       "maxine": {
@@ -40,45 +39,8 @@
       "steve": {
         "canonical": "Steve",
         "variations": [
-          "Patricia",
           "Stephen",
           "Steven"
-        ]
-      },
-      "donna": {
-        "canonical": "Donna",
-        "variations": [
-          "Reginald"
-        ]
-      },
-      "terry": {
-        "canonical": "Terry",
-        "variations": [
-          "Maxine"
-        ]
-      },
-      "michael": {
-        "canonical": "Michael",
-        "variations": [
-          "Cindy"
-        ]
-      },
-      "ross": {
-        "canonical": "Ross",
-        "variations": [
-          "Megan"
-        ]
-      },
-      "amy": {
-        "canonical": "Amy",
-        "variations": [
-          "Ryan"
-        ]
-      },
-      "darlene": {
-        "canonical": "Darlene",
-        "variations": [
-          "Steve"
         ]
       }
     },

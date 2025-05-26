@@ -17,20 +17,25 @@ from .name_extractor import NameExtractor
 from .obituary_utils import read_obituary, get_next_individual_id, initialize_individual_id_counter, add_to_input_file
 from .date_normalizer import DateNormalizer
 from .name_parser import NameParser
-from .relationship_extraction import extract_spouses_and_companions  # <-- Import from core module now
+from .relationship_extraction import extract_spouses_and_companions
 from .name_normalizer import NameNormalizer
+
+# Set up logger
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 class ObituaryProcessor:
     def __init__(self, input_file: Optional[str] = None):
         """Initialize the ObituaryProcessor with optional input file path."""
         self.input_file = input_file
         self.name_extractor = NameExtractor()
-        self.name_parser = NameParser()  # Initialize name_parser
-        self.name_normalizer = NameNormalizer()  # Initialize name_normalizer
+        self.name_parser = NameParser()
+        self.name_normalizer = NameNormalizer(variations_file="genealogy/core/name_variations.json")
         self.headers = {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
-        self.current_person = None  # Track the current person being processed
+        self.current_person = None
+        logger.debug("ObituaryProcessor initialized")
 
     def determine_gender(self, text: str) -> Optional[str]:
         """
@@ -146,15 +151,37 @@ class ObituaryProcessor:
                             break
             
             # Find spouse and companion relationships using extract_spouses_and_companions
-            spouse_name = None
-            companion_name = None
             current_last_name = (extracted_name.split()[-1] if extracted_name and ' ' in extracted_name else None)
-            relationships = extract_spouses_and_companions(main_text, current_last_name)
-            for name, rel, _ in relationships:
-                if rel == 'spouse' and not spouse_name:
-                    spouse_name = name
-                elif rel == 'companion' and not companion_name:
-                    companion_name = name
+            
+            # Create a new person if we don't have one yet
+            if not self.current_person:
+                self.current_person = {
+                    'id': get_next_individual_id(),
+                    'full_name': extracted_name,
+                    'first_name': None,
+                    'last_name': current_last_name,
+                    'middle_name': None,
+                    'location': None,
+                    'birth_date': None,
+                    'death_date': None,
+                    'url': url,
+                    'obituary_text': main_text,
+                    'spouse': None,
+                    'companion': None,
+                    'deceased': False
+                }
+            
+            # Ensure self.current_person has an 'id' before extracting relationships
+            if 'id' not in self.current_person or not self.current_person['id']:
+                self.current_person['id'] = get_next_individual_id()
+
+            # Extract relationships
+            spouse_name, companion_name = extract_spouses_and_companions(
+                main_text, 
+                current_last_name,
+                [self.current_person],  # Pass current person as the people list
+                self.current_person['id']  # Pass current person's ID
+            )
             
             # Extract birth and death dates using DateNormalizer
             birth_date = DateNormalizer.find_birth_date(main_text)
@@ -175,12 +202,14 @@ class ObituaryProcessor:
             logging.info(f"Final location used: '{location}'")
             
             # Parse the extracted name to handle variations
-            logging.debug(f"About to parse extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
+            logger.debug(f"About to parse extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
             if not extracted_name or not isinstance(extracted_name, str):
-                logging.error(f"Invalid extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
+                logger.error(f"Invalid extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
                 raise ValueError("extracted_name must be a non-empty string")
+            
             parsed_name = self.name_parser.parse_name(extracted_name)
-            logging.debug(f"Parsed name result: {parsed_name!r} (type: {type(parsed_name)})")
+            logger.debug(f"Parsed name result: {parsed_name!r} (type: {type(parsed_name)})")
+            
             first_name = parsed_name.first_name
             last_name = parsed_name.last_name
             middle_name = parsed_name.middle_name
@@ -189,74 +218,41 @@ class ObituaryProcessor:
             nickname = parsed_name.nickname
             maiden_name = parsed_name.maiden_name if hasattr(parsed_name, 'maiden_name') else None
 
+            # Log the parsed name components
+            logger.info(f"Parsed name components: first_name='{first_name}', last_name='{last_name}', middle_name='{middle_names_str}', suffix='{suffix}', nickname='{nickname}', maiden_name='{maiden_name}'")
+
             # Normalize first and last names
             canonical_first, canonical_last = self.name_normalizer.normalize_name(first_name, last_name)
+            logger.info(f"Normalized name components: canonical_first='{canonical_first}', canonical_last='{canonical_last}'")
 
-            # Debug log the values and types before constructing the person dictionary
-            logging.debug(f"canonical_first: {canonical_first!r} (type: {type(canonical_first)})")
-            logging.debug(f"canonical_last: {canonical_last!r} (type: {type(canonical_last)})")
-            logging.debug(f"middle_names_str: {middle_names_str!r} (type: {type(middle_names_str)})")
-            logging.debug(f"suffix: {suffix!r} (type: {type(suffix)})")
-            logging.debug(f"nickname: {nickname!r} (type: {type(nickname)})")
-            logging.debug(f"maiden_name: {maiden_name!r} (type: {type(maiden_name)})")
+            # Update the current person with all the extracted information
+            core_fields = {
+                'full_name': extracted_name,
+                'first_name': canonical_first,
+                'last_name': canonical_last,
+                'birth_date': birth_date,
+                'death_date': death_date,
+                'gender': gender
+            }
+            logger.debug(f"Core fields before update: {core_fields}")
+            for key, value in core_fields.items():
+                if key not in self.current_person or self.current_person[key] is None:
+                    logger.debug(f"Updating {key} from {self.current_person.get(key)} to {value}")
+                    self.current_person[key] = value
 
-            # Create the person dictionary
-            try:
-                person = {
-                    'url': url,
-                    'full_name': extracted_name or '',
-                    'location': location or '',
-                    'obituary_text': main_text,
-                    'id': get_next_individual_id(),
-                    'birth_date': birth_date,
-                    'death_date': death_date,
-                    'age': age,
-                    'gender': gender,
-                    'spouse': spouse_name,
-                    'companion': companion_name,
-                    'first_name': canonical_first,
-                    'last_name': canonical_last,
-                    'middle_names': middle_names_str,
-                    'suffix': suffix,
-                    'nickname': nickname,
-                    'maiden_name': maiden_name
-                }
-            except Exception as e:
-                logging.error(f"Exception constructing person dictionary: {e}")
-                logging.error(f"url: {url!r} (type: {type(url)})")
-                logging.error(f"extracted_name: {extracted_name!r} (type: {type(extracted_name)})")
-                logging.error(f"location: {location!r} (type: {type(location)})")
-                logging.error(f"main_text: {main_text!r} (type: {type(main_text)})")
-                logging.error(f"birth_date: {birth_date!r} (type: {type(birth_date)})")
-                logging.error(f"death_date: {death_date!r} (type: {type(death_date)})")
-                logging.error(f"age: {age!r} (type: {type(age)})")
-                logging.error(f"gender: {gender!r} (type: {type(gender)})")
-                logging.error(f"spouse_name: {spouse_name!r} (type: {type(spouse_name)})")
-                logging.error(f"companion_name: {companion_name!r} (type: {type(companion_name)})")
-                logging.error(f"canonical_first: {canonical_first!r} (type: {type(canonical_first)})")
-                logging.error(f"canonical_last: {canonical_last!r} (type: {type(canonical_last)})")
-                logging.error(f"middle_names_str: {middle_names_str!r} (type: {type(middle_names_str)})")
-                logging.error(f"suffix: {suffix!r} (type: {type(suffix)})")
-                logging.error(f"nickname: {nickname!r} (type: {type(nickname)})")
-                logging.error(f"maiden_name: {maiden_name!r} (type: {type(maiden_name)})")
-                raise
+            # Update additional fields that can be overwritten
+            self.current_person.update({
+                'middle_name': middle_names_str,
+                'suffix': suffix,
+                'nickname': nickname,
+                'maiden_name': maiden_name,
+                'location': location,
+                'age': age,
+                'obituary_text': main_text,
+                'url': url
+            })
             
-            # If force_refresh is True, update only the fields instead of creating a new person
-            if force_refresh and self.current_person:
-                self.current_person.update({
-                    'obituary_text': main_text,
-                    'birth_date': birth_date,
-                    'death_date': death_date,
-                    'age': age,
-                    'gender': gender,
-                    'spouse': spouse_name,
-                    'companion': companion_name
-                })
-                if maiden_name:
-                    self.current_person['maiden_name'] = maiden_name
-                return self.current_person
-            
-            return person
+            return self.current_person
             
         except Exception as e:
             import sys
@@ -264,7 +260,7 @@ class ObituaryProcessor:
             logging.error(f"Exception in process_url: {e}")
             exc_type, exc_value, exc_tb = sys.exc_info()
             tb_str = ''.join(traceback.format_exception(exc_type, exc_value, exc_tb))
-            logging.error(f"Traceback:\\n{tb_str}")
+            logging.error(f"Traceback:\n{tb_str}")
             # Log all local variables
             for var_name, var_val in locals().items():
                 logging.error(f"{var_name}: {var_val!r} (type: {type(var_val)})")
@@ -286,45 +282,42 @@ class ObituaryProcessor:
             return location_match.group(1).strip()
         return None
         
-    def process_file(self, force_refresh: bool = False) -> List[Dict]:
+    def process_obituaries(self, force_refresh: bool = False) -> List[Dict]:
         """
-        Process all URLs in the input file.
+        Process all obituaries in the input file.
         
         Args:
-            force_refresh: Whether to force a refresh of the data
+            force_refresh: Whether to force a refresh of all obituaries
             
         Returns:
-            List of dictionaries containing the processed data
+            List of processed person dictionaries
         """
         if not self.input_file:
-            logging.error("No input file specified")
-            return []
+            raise ValueError("No input file specified")
             
-        try:
-            # Initialize the ID counter based on existing IDs in the file
-            initialize_individual_id_counter(self.input_file)
-            with open(self.input_file, 'r') as f:
-                data = json.load(f)
-                
-            results = []
-            for item in data:
-                if 'url' in item:
-                    self.current_person = item  # Set current person before processing
-                    result = self.process_url(item['url'], force_refresh)
-                    # Preserve the original ID if force_refresh is True
-                    if force_refresh and 'id' in item:
-                        result['id'] = item['id']
-                    results.append(result)
-                else:
-                    # If the item does not have a URL, keep it unchanged
-                    results.append(item)
+        # Initialize the ID counter
+        initialize_individual_id_counter(self.input_file)
+        
+        # Read the input file
+        with open(self.input_file, 'r') as f:
+            data = json.load(f)
+            
+        # Process each person
+        for person in data:
+            self.current_person = person  # Set current person for processing
+            url = person.get('url')
+            if url:
+                try:
+                    processed = self.process_url(url, force_refresh)
+                    if processed:
+                        # Update the person with processed data
+                        person.update(processed)
+                except Exception as e:
+                    logging.error(f"Error processing URL {url}: {str(e)}")
+                    continue
                     
-            # Write results back to the input file
-            with open(self.input_file, 'w') as f:
-                json.dump(results, f, indent=2)
-                
-            return results
+        # Write the updated data back to the file
+        with open(self.input_file, 'w') as f:
+            json.dump(data, f, indent=2)
             
-        except Exception as e:
-            logging.error(f"Error processing file {self.input_file}: {str(e)}")
-            return [] 
+        return data 

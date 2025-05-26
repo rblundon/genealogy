@@ -3,11 +3,13 @@ TextProcessor: A module for processing obituary text into sentences and extracti
 """
 
 from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Dict
 import re
 import logging
-from .patterns import SPOUSE_PATTERNS
+from .patterns import SPOUSE_PATTERNS, RELATIONSHIP_PATTERNS, CONTEXT_PATTERNS, NAME_PATTERNS
 from .name_utils import infer_full_name
+from .name_extractor import NameExtractor
+from .obituary_utils import link_people, find_or_create_person
 
 logger = logging.getLogger(__name__)
 logger.propagate = True  # Ensure logs propagate to the root logger
@@ -15,155 +17,97 @@ logger.propagate = True  # Ensure logs propagate to the root logger
 
 @dataclass
 class ProcessedSentence:
-    """Represents a processed sentence with its extracted relationships and context."""
-    text: str
-    relationships: List[Tuple[str, str, str]]  # (name, relationship_type, confidence)
-    context: Optional[str] = None  # e.g., "survived by", "preceded by", etc.
+    """Data class to hold processed sentence information"""
+    sentence: str
+    relationships: List[Dict]
+    context: Optional[str] = None
 
 class TextProcessor:
     """Processes obituary text into sentences and extracts relationships."""
     
-    def __init__(self):
-        self.current_last_name: Optional[str] = None
+    def __init__(self, people: List[Dict], current_person_id: str):
+        self.people = people
+        self.current_person_id = current_person_id
+        self.name_extractor = NameExtractor()
         
-    def process_text(self, text: str, current_last_name: Optional[str] = None) -> List[ProcessedSentence]:
+    def process_text(self, text: str) -> List[ProcessedSentence]:
         """
-        Process text into sentences and extract relationships from each.
+        Process the text into sentences and extract relationships.
         
         Args:
             text: The text to process
-            current_last_name: The last name of the current person (to avoid self-matching)
             
         Returns:
-            List of ProcessedSentence objects containing the processed sentences and their relationships
+            List of ProcessedSentence objects containing the processed sentences
+            and their extracted relationships
         """
-        logger.debug(f"Processing text with current_last_name: {current_last_name}")
-        self.current_last_name = current_last_name
+        # Split into sentences
         sentences = self._split_into_sentences(text)
-        logger.debug(f"Split text into {len(sentences)} sentences")
-        return [self._process_sentence(sentence) for sentence in sentences]
-    
-    def _split_into_sentences(self, text: str) -> List[str]:
-        """
-        Split text into sentences using proper sentence boundaries.
         
-        Args:
-            text: The text to split
-            
-        Returns:
-            List of sentences
-        """
-        # Basic sentence splitting - can be enhanced for better accuracy
-        # Split on periods followed by space and capital letter, but not on common abbreviations
+        # Process each sentence
+        processed_sentences = []
+        for sentence in sentences:
+            processed = self._process_sentence(sentence)
+            if processed:
+                processed_sentences.append(processed)
+                
+        return processed_sentences
+        
+    def _split_into_sentences(self, text: str) -> List[str]:
+        """Split text into sentences using regex patterns"""
+        # Split on periods followed by space and capital letter
         sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', text)
-        # Clean up the sentences
-        cleaned_sentences = [s.strip() for s in sentences if s.strip()]
-        for i, sentence in enumerate(cleaned_sentences, 1):
-            logger.debug(f"Sentence {i}: {sentence}")
-        return cleaned_sentences
-    
-    def _process_sentence(self, sentence: str) -> ProcessedSentence:
+        return [s.strip() for s in sentences if s.strip()]
+        
+    def _process_sentence(self, sentence: str) -> Optional[ProcessedSentence]:
         """
-        Process a single sentence and extract relationships.
+        Process a single sentence to extract relationships.
         
         Args:
             sentence: The sentence to process
             
         Returns:
-            ProcessedSentence object containing the sentence and its relationships
+            ProcessedSentence object if relationships were found, None otherwise
         """
-        logger.debug(f"\nProcessing sentence: {sentence}")
         relationships = []
+        context = None
         
-        # Extract spouse and companion relationships
-        for pattern in SPOUSE_PATTERNS:
-            matches = re.finditer(pattern, sentence, re.IGNORECASE)
-            for match in matches:
-                if match.groups():
+        # Check each relationship type
+        for relation_type, patterns in RELATIONSHIP_PATTERNS.items():
+            for pattern in patterns:
+                matches = re.finditer(pattern, sentence, re.IGNORECASE)
+                for match in matches:
                     name = match.group(1).strip()
-                    logger.debug(f"Found potential relationship name: {name}")
+                    cleaned_name = self.name_extractor.clean_name(name)
                     
-                    # Skip if the name matches the current_last_name or contains specific phrases
-                    if self.current_last_name and name.endswith(self.current_last_name):
-                        logger.debug(f"Skipping {name} - matches current_last_name")
-                        continue
-                    if name.lower().startswith('of '):
-                        logger.debug(f"Skipping {name} - starts with 'of'")
-                        continue
-                    if re.search(r'\b(husband|wife|daughter|son|father|mother|brother|sister) of\b', name, re.IGNORECASE):
-                        logger.debug(f"Skipping {name} - contains relationship word")
+                    if not cleaned_name:
                         continue
                         
-                    # Handle conjunctions by splitting the name, but only if it's not part of a relationship phrase
-                    if not re.search(r'\b(husband|wife|daughter|son|father|mother|brother|sister)\b', name, re.IGNORECASE):
-                        names = re.split(r'\s+(?:and|or|but|with)\s+', name, flags=re.IGNORECASE)
-                        logger.debug(f"Split name into parts: {names}")
-                    else:
-                        names = [name]
-                        logger.debug(f"Keeping name as is due to relationship word: {name}")
+                    # If it's a single name, infer the full name using the current person's last name
+                    if ' ' not in cleaned_name:
+                        current_person = next((p for p in self.people if p.get('id') == self.current_person_id), None)
+                        if current_person and current_person.get('last_name'):
+                            cleaned_name = infer_full_name(cleaned_name, current_person.get('last_name'))
                     
-                    for single_name in names:
-                        single_name = single_name.strip()
-                        if single_name:
-                            logger.debug(f"Processing single name: {single_name}")
-                            
-                            # Skip if the name starts with 'of' or contains relationship words
-                            if single_name.lower().startswith('of '):
-                                logger.debug(f"Skipping {single_name} - starts with 'of'")
-                                continue
-                            if re.search(r'\b(husband|wife|daughter|son|father|mother|brother|sister)\b', single_name, re.IGNORECASE):
-                                logger.debug(f"Skipping {single_name} - contains relationship word")
-                                continue
-                            
-                            # Check for maiden name pattern (e.g., 'Maxine (nee Paradowski)')
-                            maiden_match = re.match(r'(\w+)\s+\(nee\s+(\w+)\)', single_name, re.IGNORECASE)
-                            if maiden_match:
-                                first_name = maiden_match.group(1)
-                                logger.debug(f"Extracted first name from maiden name pattern: {first_name}")
-                                single_name = infer_full_name(first_name, self.current_last_name)
-                                logger.debug(f"Inferred full name: {single_name}")
-                            
-                            # Skip if the inferred name matches the current_last_name or contains specific phrases
-                            if self.current_last_name and single_name.endswith(self.current_last_name):
-                                logger.debug(f"Skipping {single_name} - matches current_last_name after inference")
-                                continue
-                            if single_name.lower().startswith('of '):
-                                logger.debug(f"Skipping {single_name} - starts with 'of' after inference")
-                                continue
-                            if re.search(r'\b(husband|wife|daughter|son|father|mother|brother|sister) of\b', single_name, re.IGNORECASE):
-                                logger.debug(f"Skipping {single_name} - contains relationship word after inference")
-                                continue
-                            
-                            # Apply infer_full_name for single-word names
-                            if len(single_name.split()) == 1 and self.current_last_name:
-                                single_name = infer_full_name(single_name, self.current_last_name)
-                                logger.debug(f"Inferred full name for single name: {single_name}")
-                            
-                            # Determine relationship type based on pattern content
-                            if 'companion' in pattern.lower():
-                                logger.debug(f"Adding companion relationship: {single_name}")
-                                relationships.append((single_name, 'companion', 'high'))
-                            else:
-                                logger.debug(f"Adding spouse relationship: {single_name}")
-                                relationships.append((single_name, 'spouse', 'high'))
-        
-        # Determine context (e.g., "survived by", "preceded by")
-        context = None
-        context_patterns = {
-            'survived by': r'survived by',
-            'preceded by': r'preceded by',
-            'married to': r'married to',
-        }
-        for ctx, pattern in context_patterns.items():
-            if re.search(pattern, sentence, re.IGNORECASE):
-                context = ctx
-                logger.debug(f"Found context: {context}")
-                break
-        
-        result = ProcessedSentence(
-            text=sentence,
-            relationships=relationships,
-            context=context
-        )
-        logger.debug(f"Processed sentence result: {result}")
-        return result 
+                    # Find or create the person
+                    person_id = find_or_create_person(self.people, cleaned_name)
+                    if not person_id:
+                        continue
+                        
+                    # Link the relationship
+                    link_people(self.people, self.current_person_id, person_id, relation_type)
+                    
+                    # Add to relationships list
+                    relationships.append({
+                        'type': relation_type,
+                        'name': cleaned_name,
+                        'confidence': 'high'  # We can adjust this based on pattern complexity
+                    })
+                    
+                    # Extract context if available
+                    if len(match.groups()) > 1 and match.group(2):
+                        context = match.group(2).strip()
+                        
+        if relationships:
+            return ProcessedSentence(sentence, relationships, context)
+        return None 

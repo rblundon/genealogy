@@ -153,24 +153,24 @@ GENDER_PATTERNS = {
 # Relationship patterns
 RELATIONSHIP_PATTERNS = {
     'spouse': [
-        r'(?:wife|husband|spouse)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:married to|married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:wife|husband|spouse)\s+([A-Z][a-z]+)',  # Single name
-        r'(?:married to|married)\s+([A-Z][a-z]+)',  # Single name
-        r'(?:wife|husband|spouse)\s+([A-Z][a-z]+)\s+(?:\([^)]+\)|\'[^\']+\')',  # Name with nickname
-        r'(?:married to|married)\s+([A-Z][a-z]+)\s+(?:\([^)]+\)|\'[^\']+\')'  # Name with nickname
+        r'(?:wife|husband|spouse)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:married to|married)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'reunited with\s+(?:her|his)\s+(?:husband|wife)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:wife|husband|spouse)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
     ],
     'parent': [
-        r'(?:father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:son|daughter)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
+        r'(?:father|mother)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
     ],
     'sibling': [
-        r'(?:brother|sister)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:survived by|predeceased by)\s+(?:his|her)\s+(?:brothers|sisters|siblings)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
+        r'(?:brother|sister)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:brothers|sisters|siblings)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
     ],
     'child': [
-        r'(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)',
-        r'(?:father|mother)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)'
+        r'(?:son|daughter)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:and\s+)?daughter\s+([A-Z][a-z]+)',
+        r'(?:and\s+)?son\s+([A-Z][a-z]+)'
     ]
 }
 
@@ -211,4 +211,16 @@ SPOUSE_PATTERNS = [
     r'(?:survived by|predeceased by)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+companion\s+(?:and|,)',
     r'(?:survived by|predeceased by)\s+([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)? [A-Z][a-z]+)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?,\s+(?:his|her|their)\s+companion\s+(?:of|for)',
     r"reunited with (?:her|his) (?:husband|wife) ([A-Z][a-z]+)(?:\s+(?:and|,))"
-] 
+]
+
+# Context patterns for determining the living/deceased context of a sentence
+CONTEXT_PATTERNS = {
+    'deceased': [
+        r'preceded by',
+        r'reunited with',
+    ],
+    'alive': [
+        r'survived by',
+        r'married to',
+    ]
+} 
