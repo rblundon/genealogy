@@ -159,18 +159,44 @@ RELATIONSHIP_PATTERNS = {
         r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:wife|husband|spouse)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
     ],
     'parent': [
-        r'(?:father|mother)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
-        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:father|mother)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
+        r'(?:father|mother)\s+of\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:father|mother)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:the late )?(?:father|mother)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)'
     ],
     'sibling': [
-        r'(?:brother|sister)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
-        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:brothers|sisters|siblings)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)'
+        # Pattern for "brother/sister First (Spouse) Last and brother/sister First (Spouse) Last"
+        r'(?:his|her)?\s*(?:brother|sister)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+(?:brother|sister)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?',
+        
+        # Pattern for "brothers/sisters First (Spouse) Last and First (Spouse) Last"
+        r'(?:his|her)?\s*(?:brothers|sisters)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?',
+        
+        # Pattern for "survived by brother/sister First (Spouse) Last"
+        r'survived by (?:his|her)?\s*(?:brother|sister)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?',
+        
+        # Pattern for "survived by brothers/sisters First (Spouse) Last and First (Spouse) Last"
+        r'survived by (?:his|her)?\s*(?:brothers|sisters)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?',
+        
+        # Pattern for "brother/sister of First (Spouse) Last"
+        r'(?:brother|sister)\s+of\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?',
+        
+        # Pattern for "siblings include First (Spouse) Last and First (Spouse) Last"
+        r'siblings include\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?',
+        
+        # Pattern for "survived by siblings First (Spouse) Last and First (Spouse) Last"
+        r'survived by siblings\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?',
+        
+        # Pattern for complex listings with commas
+        r'(?:survived by|preceded by)\s+(?:his|her)?\s*(?:brothers|sisters)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s*,\s*(?:and\s+)?([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)*',
+        
+        # Pattern for "survived by brothers First (Spouse) Last and First (Spouse) Last"
+        r'survived by brothers\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?)?'
     ],
     'child': [
-        r'(?:son|daughter)\s+of\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
-        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:son|daughter)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+and|\s*,|\s*\.|\s*$)',
-        r'(?:and\s+)?daughter\s+([A-Z][a-z]+)',
-        r'(?:and\s+)?son\s+([A-Z][a-z]+)'
+        r'(?:son|daughter)\s+of\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:preceded in death by|survived by)\s+(?:his|her)\s+(?:beloved )?(?:son|daughter)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'(?:the late )?(?:son|daughter)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:\s+and|\s*,|\s*\.|\s*$)',
+        r'reunited with\s+(?:her|his)\s+(?:husband|wife)\s+[A-Z][a-z]+(?:\s+and|\s*,)\s+(?:son|daughter)\s+([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?(?:[^\w]|$)',
+        r'(?:loving|beloved)\s+(?:father|mother)\s+of\s+(?:the late )?([A-Z][a-z]+)(?:\s+\(([^)]+)\))?(?:\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*))?'
     ]
 }
 
@@ -200,7 +226,7 @@ SPOUSE_PATTERNS = [
     r'(?:married to|married) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)?)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: and|$)(?: \(nee ([^)]+)\))?',
     r'(?:preceded in death by|survived by) (?:his|her|their) (?:beloved )?(?:wife|husband|spouse) ([A-Z][a-z]+(?: [A-Z](?:\.|[a-z]+)?)?)(?:,?\s+(Jr\.|Sr\.|I{2,}|IV|V|VI|VII|VIII|IX|X))?(?: and|$)(?: \(nee ([^)]+)\))?',
     # Add pattern for "reunited with her/his husband/wife"
-    r'reunited with (?:her|his) (?:husband|wife) ([a-z]+)(?:\s+(?:and|,))',
+    r'reunited with (?:her|his) (?:husband|wife) ([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)(?:\s+(?:and|,))',
     # Add pattern for first name only
     r'reunited with (?:her|his) (?:husband|wife) ([A-Z][a-z]+)',
     # Enhanced companion patterns

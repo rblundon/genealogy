@@ -71,7 +71,16 @@ class TextProcessor:
         """
         relationships = []
         context = None
-        
+
+        # Detect context using CONTEXT_PATTERNS
+        for ctx, patterns in CONTEXT_PATTERNS.items():
+            for pat in patterns:
+                if re.search(pat, sentence, re.IGNORECASE):
+                    context = ctx
+                    break
+            if context:
+                break
+
         # Check each relationship type
         for relation_type, patterns in RELATIONSHIP_PATTERNS.items():
             for pattern in patterns:
@@ -85,28 +94,39 @@ class TextProcessor:
                         
                     # If it's a single name, infer the full name using the current person's last name
                     if ' ' not in cleaned_name:
-                        current_person = next((p for p in self.people if p.get('id') == self.current_person_id), None)
-                        if current_person and current_person.get('last_name'):
-                            cleaned_name = infer_full_name(cleaned_name, current_person.get('last_name'))
+                        # First try to get the last name from the pattern match
+                        last_name = None
+                        if len(match.groups()) > 2 and match.group(3):  # Check if pattern captured a last name
+                            last_name = match.group(3)
+                        
+                        # If no last name from pattern, use current person's last name
+                        if not last_name:
+                            current_person = next((p for p in self.people if p.get('id') == self.current_person_id), None)
+                            if current_person and current_person.get('last_name'):
+                                last_name = current_person.get('last_name')
+                        
+                        if last_name:
+                            cleaned_name = f"{cleaned_name} {last_name}"
                     
                     # Find or create the person
-                    person_id = find_or_create_person(self.people, cleaned_name)
+                    person_id = find_or_create_person(self.people, cleaned_name, context)
                     if not person_id:
                         continue
                         
                     # Link the relationship
                     link_people(self.people, self.current_person_id, person_id, relation_type)
                     
-                    # Add to relationships list
+                    # Add to relationships list, now including context
                     relationships.append({
                         'type': relation_type,
                         'name': cleaned_name,
-                        'confidence': 'high'  # We can adjust this based on pattern complexity
+                        'confidence': 'high',  # We can adjust this based on pattern complexity
+                        'context': context
                     })
                     
-                    # Extract context if available
-                    if len(match.groups()) > 1 and match.group(2):
-                        context = match.group(2).strip()
+                    # Extract context if available (legacy, can be removed if not needed)
+                    # if len(match.groups()) > 1 and match.group(2):
+                    #     context = match.group(2).strip()
                         
         if relationships:
             return ProcessedSentence(sentence, relationships, context)

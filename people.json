@@ -2,6 +2,8 @@
   {
     "url": "https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788",
     "id": "I0001",
+    "child": "P0003",
+    "sibling": "P0004",
     "full_name": "Maxine Kaczmarowski",
     "first_name": "Maxine",
     "last_name": "Kaczmarowski",
@@ -15,8 +17,7 @@
     "location": "Milwaukee, WI",
     "age": 87,
     "obituary_text": "Reunited with her husband Terrence and daughter Patricia on May 24, 2018 at the age of 87 years. Survived by her faithful son-in-law Steve Blundon; grandchildren Ryan (Amy) Blundon and Megan (Ross) Wurz; great-grandchildren Autumn, Caralyn and Finley; and brothers Reginald (Donna) Paradowski and Joseph (Rosemary) Paradowski. Also survived by other relatives and friends. Maxine was always up for Bingo, loved traveling the world and made the best walnut torte, chicken dumpling soup and apple pie.",
-    "spouse": "P0002",
-    "child": "P0003"
+    "spouse": "P0002"
   },
   {
     "id": "P0002",
@@ -29,16 +30,16 @@
     "death_date": null,
     "url": null,
     "obituary_text": null,
-    "spouse": null,
+    "spouse": "I0001",
     "companion": null,
-    "deceased": false
+    "deceased": true
   },
   {
     "id": "P0003",
-    "full_name": "Patricia Kaczmarowski",
+    "full_name": "Patricia on May",
     "first_name": "Patricia",
-    "last_name": "Kaczmarowski",
-    "middle_name": "",
+    "last_name": "May",
+    "middle_name": "on",
     "location": null,
     "birth_date": null,
     "death_date": null,
@@ -46,7 +47,22 @@
     "obituary_text": null,
     "spouse": null,
     "companion": null,
-    "deceased": false,
+    "deceased": true,
     "parent": "I0001"
+  },
+  {
+    "id": "P0004",
+    "full_name": "Reginald Paradowski and Joseph",
+    "first_name": "Reginald",
+    "last_name": "Joseph",
+    "middle_name": "Paradowski and",
+    "location": null,
+    "birth_date": null,
+    "death_date": null,
+    "url": null,
+    "obituary_text": null,
+    "spouse": null,
+    "companion": null,
+    "deceased": false
   }
 ]

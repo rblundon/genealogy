@@ -68,6 +68,10 @@ def link_people(people: List[Dict], person1_id: str, person2_id: str, field: str
         if field == 'child':
             person2['parent'] = person1_id
             logging.info(f"Linked {person2.get('full_name')} as parent of {person1.get('full_name')}")
+        # If the relationship is 'spouse', also link the spouse to the spouse as 'spouse'
+        elif field == 'spouse':
+            person2['spouse'] = person1_id
+            logging.info(f"Linked {person2.get('full_name')} as spouse of {person1.get('full_name')}")
         # If the relationship is 'parent', also link the child to the parent as 'child'
         elif field == 'parent':
             person2['child'] = person1_id
@@ -75,13 +79,14 @@ def link_people(people: List[Dict], person1_id: str, person2_id: str, field: str
     else:
         logging.warning(f"Could not link people: {person1_id} and {person2_id} - one or both not found")
 
-def find_or_create_person(people: List[Dict], full_name: str) -> Optional[str]:
+def find_or_create_person(people: List[Dict], full_name: str, context: Optional[str] = None) -> Optional[str]:
     """
     Find an existing person or create a new one.
     
     Args:
         people: List of all people dictionaries
         full_name: The full name of the person
+        context: Optional context (e.g., 'deceased', 'alive') to set deceased status
         
     Returns:
         The person's ID if found or created, None if creation failed
@@ -89,6 +94,9 @@ def find_or_create_person(people: List[Dict], full_name: str) -> Optional[str]:
     # First try to find the person
     for person in people:
         if person.get('full_name') == full_name:
+            # Update deceased status if context is provided
+            if context == 'deceased':
+                person['deceased'] = True
             return person.get('id')
     
     # If not found, create a new person
@@ -112,7 +120,7 @@ def find_or_create_person(people: List[Dict], full_name: str) -> Optional[str]:
             'obituary_text': None,
             'spouse': None,
             'companion': None,
-            'deceased': False
+            'deceased': context == 'deceased'  # Set deceased status based on context
         }
         
         people.append(new_person)
