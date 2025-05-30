@@ -1,52 +1,51 @@
-import argparse
-import sys
+import logging
+import click
+from rich.console import Console
+from rich.logging import RichHandler
 from .core.url_importer import URLImporter
-from .utils.logging_config import setup_logging
+from .core.obituary_scraper import ObituaryScraper
 
-def parse_args() -> argparse.Namespace:
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(
-        description="Genealogy Mapper - A tool for processing obituary URLs"
-    )
-    
-    parser.add_argument(
-        "--debug",
-        action="store_true",
-        help="Enable debug logging"
-    )
-    
-    parser.add_argument(
-        "--import-url",
-        metavar="URL",
-        help="Import a new obituary URL"
-    )
-    
-    return parser.parse_args()
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(message)s",
+    datefmt="[%X]",
+    handlers=[RichHandler(rich_tracebacks=True)]
+)
 
-def main() -> int:
-    """Main entry point for the application."""
-    args = parse_args()
-    
-    # Set up logging
-    logger = setup_logging(debug=args.debug)
+logger = logging.getLogger("genealogy_mapper")
+console = Console()
+
+@click.command()
+@click.option('--debug', is_flag=True, help='Enable debug logging')
+@click.option('--import-url', metavar='URL', help='Import an obituary URL')
+@click.option('--extract-text', is_flag=True, help='Extract and display obituary text')
+def cli(debug, import_url, extract_text):
+    """Genealogy Mapper - A tool for processing and managing genealogy data."""
+    if debug:
+        logger.setLevel(logging.DEBUG)
     logger.info("Starting Genealogy Mapper")
-    
-    try:
-        if args.import_url:
-            importer = URLImporter()
-            if importer.import_url(args.import_url):
-                logger.info("URL import completed successfully")
-                return 0
-            else:
-                logger.error("URL import failed")
-                return 1
-        else:
-            logger.error("No command specified. Use --help for available commands.")
-            return 1
-            
-    except Exception as e:
-        logger.exception("An error occurred")
-        return 1
 
-if __name__ == "__main__":
-    sys.exit(main()) 
+    if import_url:
+        importer = URLImporter()
+        scraper = ObituaryScraper()
+        if importer.import_url(import_url):
+            logger.info("URL import completed successfully")
+            if extract_text:
+                logger.info("Extracting obituary text...")
+                result = scraper.extract_legacy_com(import_url)
+                if result:
+                    console.print("\n[bold blue]Obituary Text:[/bold blue]")
+                    console.print(result["text"])
+                    console.print("\n[bold blue]Metadata:[/bold blue]")
+                    for key, value in result["metadata"].items():
+                        console.print(f"{key.replace('_', ' ').title()}: {value}")
+                else:
+                    logger.error("Failed to extract obituary text")
+        else:
+            logger.error("URL import failed")
+    else:
+        logger.error("No command specified. Use --help for available options.")
+
+if __name__ == '__main__':
+    cli() 

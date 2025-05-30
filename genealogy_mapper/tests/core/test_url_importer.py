@@ -32,8 +32,9 @@ class TestURLImporter:
         with open(temp_json_path, 'r') as f:
             data = json.load(f)
             assert "version" in data
-            assert "obituaries" in data
-            assert isinstance(data["obituaries"], list)
+            assert "urls" in data
+            assert data["version"] == "1.0"
+            assert data["urls"] == []
 
     def test_validate_url_valid(self, sample_url):
         """Test URL validation with a valid URL."""
@@ -67,14 +68,13 @@ class TestURLImporter:
             importer = URLImporter()
             assert importer.validate_url(sample_url) is False
 
-    def test_import_url_success(self, temp_json_path, sample_url, sample_data):
+    def test_import_url_success(self, temp_json_path, sample_url):
         """Test successful URL import."""
-        # Mock the file operations
-        mock_file = mock_open(read_data=json.dumps(sample_data))
+        # Create initial empty file
+        with open(temp_json_path, 'w') as f:
+            json.dump({"urls": [], "version": "1.0"}, f)
         
-        with patch('builtins.open', mock_file), \
-             patch('requests.Session.get') as mock_get:
-            
+        with patch('requests.Session.get') as mock_get:
             mock_response = mock_get.return_value
             mock_response.status_code = 200
             mock_response.text = "This is an obituary page"
@@ -84,43 +84,12 @@ class TestURLImporter:
             # Test the import
             assert importer.import_url(sample_url) is True
             
-            # Verify the write operation
-            mock_file.assert_called_with(temp_json_path, 'w', encoding='utf-8')
-
-    def test_import_url_duplicate(self, tmp_path, sample_data):
-        """Test importing a URL that already exists."""
-        # Create initial JSON file with one URL
-        json_path = tmp_path / "obituaries.json"
-        sample_data["obituaries"] = [{
-            "id": "legacy-1",
-            "url": "https://example.com/obituary/1",
-            "source": "legacy.com",
-            "date_added": "2024-03-19",
-            "status": "pending",
-            "metadata": {
-                "newspaper": "Unknown",
-                "location": "Unknown"
-            }
-        }]
-        
-        with open(json_path, 'w') as f:
-            json.dump(sample_data, f)
-        
-        with patch('requests.Session.get') as mock_get:
-            mock_response = mock_get.return_value
-            mock_response.status_code = 200
-            mock_response.text = "This is an obituary page"
-            
-            importer = URLImporter(str(json_path))
-            
-            # Try to import the same URL again
-            result = importer.import_url("https://example.com/obituary/1")
-            
-            # Should return False and not add duplicate
-            assert result is False
-            with open(json_path) as f:
+            # Verify the file contents
+            with open(temp_json_path, 'r') as f:
                 data = json.load(f)
-                assert len(data["obituaries"]) == 1  # Should still only have one entry
+                assert len(data["urls"]) == 1
+                assert data["urls"][0]["url"] == sample_url
+                assert "imported_at" in data["urls"][0]
 
     def test_import_url_invalid(self, temp_json_path):
         """Test importing an invalid URL."""
@@ -134,40 +103,33 @@ class TestURLImporter:
             f.write("invalid json content")
         
         importer = URLImporter(str(temp_json_path))
-        with pytest.raises(json.JSONDecodeError):
-            importer._read_json()
+        urls = importer._load_urls()
+        assert urls == []  # Should return empty list for corrupted file
 
-    def test_import_url_duplicate(self, tmp_path, sample_data):
+    def test_import_url_duplicate(self, tmp_path):
         """Test importing a URL that already exists."""
         # Create initial JSON file with one URL
         json_path = tmp_path / "obituaries.json"
-        sample_data["obituaries"] = [{
-            "id": "legacy-1",
-            "url": "https://example.com/obituary/1",
-            "source": "legacy.com",
-            "date_added": "2024-03-19",
-            "status": "pending",
-            "metadata": {
-                "newspaper": "Unknown",
-                "location": "Unknown"
-            }
-        }]
+        initial_data = {
+            "urls": [{
+                "url": "https://example.com/obituary/1",
+                "imported_at": "2024-03-19T00:00:00"
+            }],
+            "version": "1.0"
+        }
         
         with open(json_path, 'w') as f:
-            json.dump(sample_data, f)
+            json.dump(initial_data, f)
         
-        with patch('requests.Session.get') as mock_get:
-            mock_response = mock_get.return_value
-            mock_response.status_code = 200
-            mock_response.text = "This is an obituary page"
-            
-            importer = URLImporter(str(json_path))
-            
-            # Try to import the same URL again
-            result = importer.import_url("https://example.com/obituary/1")
-            
-            # Should return False and not add duplicate
-            assert result is False
-            with open(json_path) as f:
-                data = json.load(f)
-                assert len(data["obituaries"]) == 1  # Should still only have one entry 
+        importer = URLImporter(str(json_path))
+        
+        # Try to import the same URL again
+        result = importer.import_url("https://example.com/obituary/1")
+        
+        # Should return True for duplicate (matching CLI logic)
+        assert result is True
+        
+        # Verify no new URL was added
+        with open(json_path, 'r') as f:
+            data = json.load(f)
+            assert len(data["urls"]) == 1 
