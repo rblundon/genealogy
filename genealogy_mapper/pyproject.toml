@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "genealogy_mapper"
+version = "0.1.0"
+authors = [
+    { name = "Your Name", email = "your.email@example.com" },
+]
+description = "A tool for mapping genealogy data from obituaries"
+readme = "README.md"
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.31.0",
+    "validators>=0.22.0",
+    "python-dateutil>=2.8.2",
+    "rich>=13.7.0",
+]
+
+[project.scripts]
+genealogy-mapper = "genealogy_mapper.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/genealogy_mapper"] 
