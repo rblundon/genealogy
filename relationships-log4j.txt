@@ -1,0 +1,28 @@
+// Create people nodes
+CREATE (maxine:Person {name: "Maxine Kaczmarowski"})
+CREATE (terry:Person {name: "Terrence (Terry) Kaczmarowski"})
+CREATE (patricia:Person {name: "Patricia Blundon"})
+CREATE (reginald:Person {name: "Reginald Paradowski"})
+CREATE (marty:Person {name: "Marty Blundon"})
+CREATE (katie:Person {name: "Katie Blundon"})
+CREATE (monica:Person {name: "Monica Clasen"})
+CREATE (ron:Person {name: "Ron Clasen"})
+CREATE (brian:Person {name: "Brian Hennen"})
+CREATE (amy:Person {name: "Amy Hennen"})
+CREATE (crystal:Person {name: "Crystal Paradowski"})
+CREATE (jessica:Person {name: "Jessica Paradowski"})
+
+// Create relationships
+CREATE (maxine)-[:MARRIED_TO]->(terry)
+CREATE (maxine)-[:PARENT_OF]->(patricia)
+CREATE (reginald)-[:SIBLING_OF]->(maxine)
+CREATE (patricia)-[:MARRIED_TO]->(marty)
+CREATE (marty)-[:MARRIED_TO]->(katie)
+CREATE (patricia)-[:RELATED_TO_IN_LAW]->(monica)
+CREATE (monica)-[:MARRIED_TO]->(ron)
+
+// Grandchildren (via Reginald Paradowski)
+CREATE (reginald)-[:GRANDPARENT_OF]->(brian)
+CREATE (reginald)-[:GRANDPARENT_OF]->(amy)
+CREATE (reginald)-[:GRANDPARENT_OF]->(crystal)
+CREATE (reginald)-[:GRANDPARENT_OF]->(jessica)
