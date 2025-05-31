@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-genealogy-mapper = "genealogy_mapper.cli:main"
+genealogy-mapper = "genealogy_mapper.cli:cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/genealogy_mapper"] 
