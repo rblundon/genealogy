@@ -6,12 +6,19 @@ from bs4 import BeautifulSoup
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException
+from selenium.webdriver.support.ui import WebDriverWait
 from .base_scraper import BaseScraper
 
 logger = logging.getLogger(__name__)
 
 class LegacyScraper(BaseScraper):
     """Scraper for Legacy.com obituaries."""
+    
+    def __init__(self, timeout: int = 30):
+        """Initialize the scraper with a custom timeout."""
+        super().__init__(timeout=timeout)
+        self.driver.set_page_load_timeout(timeout)
+        self.wait = WebDriverWait(self.driver, timeout)
     
     def extract(self, url: str) -> Optional[Dict[str, Any]]:
         """
@@ -98,9 +105,9 @@ class LegacyScraper(BaseScraper):
             for script in soup.find_all("script", type="application/ld+json"):
                 try:
                     data = json.loads(script.string)
-                    if "articleBody" in data:
-                        text = data["articleBody"]
-                        if text and len(text) > 100:  # Ensure we have substantial content
+                    if "description" in data:
+                        text = data["description"]
+                        if text:  # Remove length check for JSON-LD
                             logger.debug("Found obituary text in JSON-LD data")
                             return text
                 except Exception as e:
@@ -128,14 +135,14 @@ class LegacyScraper(BaseScraper):
                 if text_div:
                     # Clean up the text
                     text = text_div.get_text(separator='\n', strip=True)
-                    if text and len(text) > 100:  # Ensure we have substantial content
+                    if text:  # Remove length check for HTML content
                         return text
             
             # If no specific selector worked, try to find the main content area
             main_content = soup.find('main') or soup.find('article')
             if main_content:
                 text = main_content.get_text(separator='\n', strip=True)
-                if text and len(text) > 100:  # Ensure we have substantial content
+                if text:  # Remove length check for main content
                     return text
             
             return None
@@ -162,10 +169,10 @@ class LegacyScraper(BaseScraper):
                     data = json.loads(script.string)
                     
                     # Extract name from headline or name field
-                    if "headline" in data:
-                        metadata["name"] = data["headline"].split(" Obituary")[0]
-                    elif "name" in data:
+                    if "name" in data:
                         metadata["name"] = data["name"]
+                    elif "headline" in data:
+                        metadata["name"] = data["headline"].split(" Obituary")[0]
                     
                     # Extract location
                     if "deathPlace" in data and "address" in data["deathPlace"]:
@@ -202,7 +209,8 @@ class LegacyScraper(BaseScraper):
                 'h1[class*="obit"]',
                 'h1[class*="obituary"]',
                 'h1.obit-title',
-                'h1.obituary-title'
+                'h1.obituary-title',
+                'h1'  # Fallback to any h1
             ]
             
             for selector in name_selectors:
@@ -248,28 +256,13 @@ class LegacyScraper(BaseScraper):
             ]
             
             for selector in date_selectors:
-                dates_elem = soup.select_one(selector)
-                if dates_elem:
-                    dates_text = dates_elem.get_text(strip=True)
-                    # Try to parse birth and death dates
-                    if " - " in dates_text:
-                        birth, death = dates_text.split(" - ", 1)
-                        metadata["birth_date"] = birth.strip()
-                        metadata["death_date"] = death.strip()
-                    break
-            
-            # Try to extract publication date
-            pub_date_selectors = [
-                'div.obit-date',
-                'div.obituary-date',
-                'div[class*="publication-date"]',
-                'span[class*="publication-date"]'
-            ]
-            
-            for selector in pub_date_selectors:
-                pub_date_elem = soup.select_one(selector)
-                if pub_date_elem:
-                    metadata["publication_date"] = pub_date_elem.get_text(strip=True)
+                date_elem = soup.select_one(selector)
+                if date_elem:
+                    date_text = date_elem.get_text(strip=True)
+                    if " - " in date_text:
+                        birth_date, death_date = date_text.split(" - ", 1)
+                        metadata["birth_date"] = birth_date.strip()
+                        metadata["death_date"] = death_date.strip()
                     break
             
             return metadata
