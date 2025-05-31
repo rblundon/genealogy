@@ -5,36 +5,33 @@ from typing import Dict, List, Optional
 import requests
 import validators
 from datetime import datetime
-from .obituary_scraper import ObituaryScraper
+from .scrapers.factory import ScraperFactory
 
 logger = logging.getLogger(__name__)
 
 class URLImporter:
     """Class for importing and managing obituary URLs."""
     
-    def __init__(self, json_file: str = None, timeout: int = 3):
+    def __init__(self, json_file: str = "obituary_urls.json", timeout: int = 3, force_rescrape: bool = False):
         """
         Initialize the URL importer.
         
         Args:
-            json_file (str): Path to the JSON file storing URLs
+            json_file (str): Path to the JSON file for storing URLs
             timeout (int): Maximum time to wait for elements to load, in seconds
+            force_rescrape (bool): If True, process all URLs even if they have "completed" status
         """
-        # Default to project root if not specified
-        if json_file is None:
-            # This file: .../genealogy_mapper/src/genealogy_mapper/core/url_importer.py
-            # Project root: .../genealogy/
-            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
-            json_file = os.path.join(project_root, 'obituary_urls.json')
         self.json_file = json_file
         self.timeout = timeout
+        self.force_rescrape = force_rescrape
+        self._ensure_json_exists()
+        self._migrate_old_data()
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         })
-        self._ensure_json_file_exists()
     
-    def _ensure_json_file_exists(self) -> None:
+    def _ensure_json_exists(self) -> None:
         """Ensure the JSON file exists with proper structure."""
         if not os.path.exists(self.json_file):
             initial_data = {
@@ -43,6 +40,11 @@ class URLImporter:
             }
             with open(self.json_file, 'w') as f:
                 json.dump(initial_data, f, indent=2)
+    
+    def _migrate_old_data(self) -> None:
+        """Migrate old data format to new format."""
+        # Implementation of _migrate_old_data method
+        pass
     
     def _load_json(self) -> Dict:
         """Load and validate JSON data."""
@@ -133,9 +135,26 @@ class URLImporter:
         return True
 
     def get_unprocessed_urls(self) -> List[Dict]:
-        """Get all URLs that haven't been successfully processed."""
-        data = self._load_json()
-        return data["urls"]  # Return all URLs regardless of status
+        """
+        Get all URLs that need to be processed.
+        
+        Returns:
+            List[Dict]: List of URLs that need processing
+        """
+        try:
+            with open(self.json_file, 'r') as f:
+                data = json.load(f)
+                
+            if self.force_rescrape:
+                # Return all URLs if force_rescrape is True
+                return data.get("urls", [])
+            else:
+                # Return only URLs that haven't been successfully processed
+                return [url for url in data.get("urls", []) if url.get("status") != "completed"]
+                
+        except Exception as e:
+            logger.error(f"Error reading URLs: {str(e)}")
+            return []
 
     def update_url_status(self, url: str, status: str, extracted_text: Optional[str] = None, metadata: Optional[Dict] = None) -> bool:
         """Update the status and data for a URL."""
@@ -163,14 +182,20 @@ class URLImporter:
             logger.info("No unprocessed URLs to process")
             return []
 
-        scraper = ObituaryScraper(timeout=self.timeout)
         processed = []
 
         for entry in unprocessed_urls:
             url = entry["url"]
             logger.info(f"Processing URL: {url}")
             
-            result = scraper.extract_legacy_com(url)
+            # Create appropriate scraper for the URL
+            scraper = ScraperFactory.create_scraper(url, timeout=self.timeout)
+            if not scraper:
+                logger.error(f"No suitable scraper found for URL: {url}")
+                self.update_url_status(url=url, status="failed")
+                continue
+            
+            result = scraper.extract(url)
             if result:
                 self.update_url_status(
                     url=url,
