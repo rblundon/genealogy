@@ -1,8 +1,11 @@
 import json
 import pytest
 from pathlib import Path
-from unittest.mock import patch, mock_open
+from unittest.mock import patch, mock_open, Mock
 from genealogy_mapper.core.url_importer import URLImporter
+from genealogy_mapper.core.scrapers.legacy_scraper import LegacyScraper
+from genealogy_mapper.core.scrapers.factory import ScraperFactory
+from datetime import datetime
 
 @pytest.fixture
 def temp_json_path(tmp_path):
@@ -21,6 +24,11 @@ def sample_data():
         "urls": [],
         "last_updated": "2024-03-19T00:00:00"
     }
+
+@pytest.fixture
+def importer(temp_json_path):
+    """Create a URLImporter instance with a temporary file."""
+    return URLImporter(str(temp_json_path))
 
 class TestURLImporter:
     def test_init_creates_file_if_not_exists(self, temp_json_path):
@@ -87,10 +95,10 @@ class TestURLImporter:
                 data = json.load(f)
                 assert len(data["urls"]) == 1
                 assert data["urls"][0]["url"] == sample_url
-                assert "imported_at" in data["urls"][0]
+                assert "date_added" in data["urls"][0]
                 assert data["urls"][0]["status"] == "pending"
                 assert data["urls"][0]["extracted_text"] is None
-                assert data["urls"][0]["metadata"] is None
+                assert data["urls"][0]["metadata"] is not None
 
     def test_import_url_invalid(self, temp_json_path):
         """Test importing an invalid URL."""
@@ -114,7 +122,7 @@ class TestURLImporter:
         initial_data = {
             "urls": [{
                 "url": "https://example.com/obituary/1",
-                "imported_at": "2024-03-19T00:00:00",
+                "date_added": "2024-03-19",
                 "status": "pending",
                 "extracted_text": None,
                 "metadata": None
@@ -138,21 +146,21 @@ class TestURLImporter:
             data = json.load(f)
             assert len(data["urls"]) == 1
 
-    def test_get_pending_urls(self, temp_json_path):
-        """Test getting pending URLs."""
+    def test_get_unprocessed_urls(self, temp_json_path):
+        """Test getting unprocessed URLs."""
         # Create initial data with mixed status URLs
         initial_data = {
             "urls": [
                 {
                     "url": "https://example.com/obituary/1",
-                    "imported_at": "2024-03-19T00:00:00",
+                    "date_added": "2024-03-19",
                     "status": "pending",
                     "extracted_text": None,
                     "metadata": None
                 },
                 {
                     "url": "https://example.com/obituary/2",
-                    "imported_at": "2024-03-19T00:00:00",
+                    "date_added": "2024-03-19",
                     "status": "completed",
                     "extracted_text": "Some text",
                     "metadata": {"name": "John Doe"}
@@ -165,11 +173,11 @@ class TestURLImporter:
             json.dump(initial_data, f)
         
         importer = URLImporter(str(temp_json_path))
-        pending_urls = importer.get_pending_urls()
+        unprocessed_urls = importer.get_unprocessed_urls()
         
-        assert len(pending_urls) == 1
-        assert pending_urls[0]["url"] == "https://example.com/obituary/1"
-        assert pending_urls[0]["status"] == "pending"
+        assert len(unprocessed_urls) == 1
+        assert unprocessed_urls[0]["url"] == "https://example.com/obituary/1"
+        assert unprocessed_urls[0]["status"] == "pending"
 
     def test_update_url_status(self, temp_json_path):
         """Test updating URL status and data."""
@@ -177,7 +185,7 @@ class TestURLImporter:
         initial_data = {
             "urls": [{
                 "url": "https://example.com/obituary/1",
-                "imported_at": "2024-03-19T00:00:00",
+                "date_added": "2024-03-19",
                 "status": "pending",
                 "extracted_text": None,
                 "metadata": None
@@ -207,42 +215,48 @@ class TestURLImporter:
             assert data["urls"][0]["extracted_text"] == "Obituary text"
             assert data["urls"][0]["metadata"] == {"name": "John Doe"}
 
-    def test_process_pending_urls(self, temp_json_path):
-        """Test processing pending URLs."""
-        # Create initial data with pending URL
-        initial_data = {
-            "urls": [{
-                "url": "https://example.com/obituary/1",
-                "imported_at": "2024-03-19T00:00:00",
-                "status": "pending",
-                "extracted_text": None,
-                "metadata": None
-            }],
-            "last_updated": "2024-03-19T00:00:00"
+    def test_process_urls_success(self, importer, tmp_path):
+        """Test successful processing of URLs."""
+        # Create test URLs file
+        test_urls = {
+            "urls": [
+                {
+                    "url": "https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788",
+                    "status": "pending",
+                    "date_added": datetime.now().strftime("%Y-%m-%d"),
+                    "extracted_text": None,
+                    "metadata": None
+                }
+            ],
+            "last_updated": datetime.now().isoformat()
         }
         
-        with open(temp_json_path, 'w') as f:
-            json.dump(initial_data, f)
+        # Write test data to the importer's file
+        with open(importer.json_path, 'w') as f:
+            json.dump(test_urls, f)
         
-        importer = URLImporter(str(temp_json_path))
-        
-        # Mock the scraper's extract_legacy_com method
-        with patch('genealogy_mapper.core.obituary_scraper.ObituaryScraper.extract_legacy_com') as mock_extract:
-            mock_extract.return_value = {
-                "text": "Obituary text",
-                "metadata": {"name": "John Doe"}
+        # Mock the scraper factory and LegacyScraper
+        with patch('genealogy_mapper.core.scrapers.factory.ScraperFactory.create_scraper') as mock_factory:
+            mock_scraper = Mock(spec=LegacyScraper)
+            mock_factory.return_value = mock_scraper
+            mock_scraper.extract.return_value = {
+                "text": "Test obituary text",
+                "metadata": {
+                    "name": "Test Name",
+                    "newspaper": "Test Paper"
+                }
             }
             
-            processed = importer.process_pending_urls()
+            # Process URLs
+            importer.process_pending_urls()
             
-            assert len(processed) == 1
-            assert processed[0]["url"] == "https://example.com/obituary/1"
-            assert processed[0]["text"] == "Obituary text"
-            assert processed[0]["metadata"] == {"name": "John Doe"}
-            
-            # Verify the update in the file
-            with open(temp_json_path, 'r') as f:
+            # Verify results
+            with open(importer.json_path, 'r') as f:
                 data = json.load(f)
+                assert len(data["urls"]) == 1
                 assert data["urls"][0]["status"] == "completed"
-                assert data["urls"][0]["extracted_text"] == "Obituary text"
-                assert data["urls"][0]["metadata"] == {"name": "John Doe"} 
+                assert "extracted_text" in data["urls"][0]
+                assert "metadata" in data["urls"][0]
+                assert data["urls"][0]["extracted_text"] == "Test obituary text"
+                assert data["urls"][0]["metadata"]["name"] == "Test Name"
+                assert data["urls"][0]["metadata"]["newspaper"] == "Test Paper" 

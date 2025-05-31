@@ -25,11 +25,13 @@ def display_obituary_text(text: str, metadata: dict) -> None:
 
 @click.group()
 @click.option('--timeout', type=int, default=3, help='Maximum time to wait for elements to load, in seconds')
+@click.option('--obituaries-file', type=click.Path(), help='Path to the obituary URLs JSON file (default: project root/obituary_urls.json)')
 @click.pass_context
-def cli(ctx, timeout):
+def cli(ctx, timeout, obituaries_file):
     """Genealogy Mapper CLI."""
     ctx.ensure_object(dict)
     ctx.obj['timeout'] = timeout
+    ctx.obj['json_path'] = obituaries_file
     logger.info("Starting Genealogy Mapper")
 
 @cli.command()
@@ -37,7 +39,7 @@ def cli(ctx, timeout):
 @click.pass_context
 def import_url(ctx, import_url):
     """Import a new obituary URL."""
-    importer = URLImporter(timeout=ctx.obj['timeout'])
+    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=ctx.obj['json_path'])
     if importer.import_url(import_url):
         logger.info("URL import completed successfully")
     else:
@@ -48,7 +50,7 @@ def import_url(ctx, import_url):
 def extract_obit_text(ctx):
     """Process all pending URLs and extract their text."""
     logger.info("Processing pending obituary URLs...")
-    importer = URLImporter(timeout=ctx.obj['timeout'])
+    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=ctx.obj['json_path'])
     processed = importer.process_pending_urls()
     if processed:
         logger.info(f"Successfully processed {len(processed)} URLs")

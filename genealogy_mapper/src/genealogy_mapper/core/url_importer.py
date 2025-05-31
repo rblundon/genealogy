@@ -9,36 +9,44 @@ from .scrapers.factory import ScraperFactory
 
 logger = logging.getLogger(__name__)
 
+def get_project_root() -> str:
+    """Get the project root directory."""
+    # Start from the current file's directory and go up until we find the project root
+    current_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+    return current_dir
+
 class URLImporter:
     """Class for importing and managing obituary URLs."""
     
-    def __init__(self, json_file: str = "obituary_urls.json", timeout: int = 3, force_rescrape: bool = False):
+    def __init__(self, json_path: Optional[str] = None, timeout: int = 3, force_rescrape: bool = False):
         """
         Initialize the URL importer.
         
         Args:
-            json_file (str): Path to the JSON file for storing URLs
+            json_path (Optional[str]): Path to the JSON file for storing URLs. If None, uses default in project root.
             timeout (int): Maximum time to wait for elements to load, in seconds
             force_rescrape (bool): If True, process all URLs even if they have "completed" status
         """
-        self.json_file = json_file
+        if json_path is None:
+            json_path = os.path.join(get_project_root(), "obituary_urls.json")
+        self.json_path = json_path
         self.timeout = timeout
         self.force_rescrape = force_rescrape
-        self._ensure_json_exists()
+        self._ensure_json_file()
         self._migrate_old_data()
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         })
     
-    def _ensure_json_exists(self) -> None:
+    def _ensure_json_file(self) -> None:
         """Ensure the JSON file exists with proper structure."""
-        if not os.path.exists(self.json_file):
+        if not os.path.exists(self.json_path):
             initial_data = {
                 "urls": [],
                 "last_updated": datetime.now().isoformat()
             }
-            with open(self.json_file, 'w') as f:
+            with open(self.json_path, 'w') as f:
                 json.dump(initial_data, f, indent=2)
     
     def _migrate_old_data(self) -> None:
@@ -49,7 +57,7 @@ class URLImporter:
     def _load_json(self) -> Dict:
         """Load and validate JSON data."""
         try:
-            with open(self.json_file, 'r') as f:
+            with open(self.json_path, 'r') as f:
                 data = json.load(f)
                 if not isinstance(data, dict):
                     raise ValueError("Invalid JSON structure")
@@ -57,13 +65,13 @@ class URLImporter:
                     data["urls"] = []
                 return data
         except (json.JSONDecodeError, FileNotFoundError):
-            logger.warning(f"Could not read {self.json_file}, creating new file")
+            logger.warning(f"Could not read {self.json_path}, creating new file")
             return {"urls": [], "last_updated": datetime.now().isoformat()}
     
     def _save_json(self, data: Dict) -> None:
         """Save data to JSON file."""
         data["last_updated"] = datetime.now().isoformat()
-        with open(self.json_file, 'w') as f:
+        with open(self.json_path, 'w') as f:
             json.dump(data, f, indent=2)
     
     def validate_url(self, url: str) -> bool:
@@ -142,7 +150,7 @@ class URLImporter:
             List[Dict]: List of URLs that need processing
         """
         try:
-            with open(self.json_file, 'r') as f:
+            with open(self.json_path, 'r') as f:
                 data = json.load(f)
                 
             if self.force_rescrape:
