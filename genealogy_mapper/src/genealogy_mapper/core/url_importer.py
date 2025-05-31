@@ -1,65 +1,68 @@
 import json
 import logging
 import os
-from typing import List, Optional
+from typing import Dict, List, Optional
 import requests
 import validators
 from datetime import datetime
+from .obituary_scraper import ObituaryScraper
 
-logger = logging.getLogger("genealogy_mapper")
+logger = logging.getLogger(__name__)
 
 class URLImporter:
     """Class for importing and managing obituary URLs."""
     
-    def __init__(self, data_file: str = "obituaries.json"):
+    def __init__(self, json_file: str = None, timeout: int = 3):
         """
         Initialize the URL importer.
         
         Args:
-            data_file (str): Path to the JSON file storing URLs
+            json_file (str): Path to the JSON file storing URLs
+            timeout (int): Maximum time to wait for elements to load, in seconds
         """
-        self.data_file = data_file
+        # Default to project root if not specified
+        if json_file is None:
+            # This file: .../genealogy_mapper/src/genealogy_mapper/core/url_importer.py
+            # Project root: .../genealogy/
+            project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', '..', '..'))
+            json_file = os.path.join(project_root, 'obituary_urls.json')
+        self.json_file = json_file
+        self.timeout = timeout
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
         })
-        self._initialize_data_file()
+        self._ensure_json_file_exists()
     
-    def _initialize_data_file(self) -> None:
-        """Initialize the data file if it doesn't exist."""
-        if not os.path.exists(self.data_file):
-            logger.info(f"Creating new data file: {self.data_file}")
-            with open(self.data_file, 'w') as f:
-                json.dump({
-                    "urls": [],
-                    "version": "1.0"
-                }, f, indent=2)
+    def _ensure_json_file_exists(self) -> None:
+        """Ensure the JSON file exists with proper structure."""
+        if not os.path.exists(self.json_file):
+            initial_data = {
+                "urls": [],
+                "last_updated": datetime.now().isoformat()
+            }
+            with open(self.json_file, 'w') as f:
+                json.dump(initial_data, f, indent=2)
     
-    def _load_urls(self) -> List[dict]:
-        """Load URLs from the data file."""
+    def _load_json(self) -> Dict:
+        """Load and validate JSON data."""
         try:
-            with open(self.data_file, 'r') as f:
+            with open(self.json_file, 'r') as f:
                 data = json.load(f)
-                return data.get("urls", [])
-        except json.JSONDecodeError:
-            logger.error(f"Error reading {self.data_file}: Invalid JSON format")
-            return []
-        except Exception as e:
-            logger.error(f"Error reading {self.data_file}: {str(e)}")
-            return []
+                if not isinstance(data, dict):
+                    raise ValueError("Invalid JSON structure")
+                if "urls" not in data:
+                    data["urls"] = []
+                return data
+        except (json.JSONDecodeError, FileNotFoundError):
+            logger.warning(f"Could not read {self.json_file}, creating new file")
+            return {"urls": [], "last_updated": datetime.now().isoformat()}
     
-    def _save_urls(self, urls: List[dict]) -> bool:
-        """Save URLs to the data file."""
-        try:
-            with open(self.data_file, 'r') as f:
-                data = json.load(f)
-            data["urls"] = urls
-            with open(self.data_file, 'w') as f:
-                json.dump(data, f, indent=2)
-            return True
-        except Exception as e:
-            logger.error(f"Error saving to {self.data_file}: {str(e)}")
-            return False
+    def _save_json(self, data: Dict) -> None:
+        """Save data to JSON file."""
+        data["last_updated"] = datetime.now().isoformat()
+        with open(self.json_file, 'w') as f:
+            json.dump(data, f, indent=2)
     
     def validate_url(self, url: str) -> bool:
         """
@@ -92,46 +95,96 @@ class URLImporter:
     
     def import_url(self, url: str) -> bool:
         """
-        Import a new URL.
+        Import a URL into the database.
         
         Args:
-            url (str): The URL to import
+            url: The URL to import
             
         Returns:
-            bool: True if the URL was imported successfully, False otherwise
+            bool: True if URL was imported or already exists, False if import failed
         """
-        logger.info(f"Attempting to import URL: {url}")
+        if not validators.url(url):
+            logger.error(f"Invalid URL format: {url}")
+            return False
 
-        urls = self._load_urls()
-
-        # Check for duplicates first
-        if any(u["url"] == url for u in urls):
+        data = self._load_json()
+        
+        # Check for duplicates
+        if any(entry["url"] == url for entry in data["urls"]):
             logger.info(f"URL already exists in database: {url}")
             return True
 
-        # Only validate if not a duplicate
-        if not self.validate_url(url):
-            return False
-        
-        # Add new URL
-        new_url = {
+        # Add new URL with pending status
+        new_entry = {
             "url": url,
-            "imported_at": datetime.now().isoformat()
+            "date_added": datetime.now().strftime("%Y-%m-%d"),
+            "source": "legacy.com" if "legacy.com" in url else "unknown",
+            "status": "pending",
+            "extracted_text": None,
+            "metadata": {
+                "newspaper": "Unknown",
+                "location": "Unknown"
+            }
         }
-        urls.append(new_url)
         
-        if self._save_urls(urls):
-            logger.info(f"Successfully imported URL: {url}")
-            return True
-        else:
-            logger.error(f"Failed to save URL: {url}")
-            return False
-    
-    def get_urls(self) -> List[dict]:
+        data["urls"].append(new_entry)
+        self._save_json(data)
+        logger.info(f"Successfully imported URL: {url}")
+        return True
+
+    def get_unprocessed_urls(self) -> List[Dict]:
+        """Get all URLs that haven't been successfully processed."""
+        data = self._load_json()
+        return data["urls"]  # Return all URLs regardless of status
+
+    def update_url_status(self, url: str, status: str, extracted_text: Optional[str] = None, metadata: Optional[Dict] = None) -> bool:
+        """Update the status and data for a URL."""
+        data = self._load_json()
+        for entry in data["urls"]:
+            if entry["url"] == url:
+                entry["status"] = status
+                if extracted_text is not None:
+                    entry["extracted_text"] = extracted_text
+                if metadata is not None:
+                    entry["metadata"] = metadata
+                self._save_json(data)
+                return True
+        return False
+
+    def process_pending_urls(self) -> List[Dict]:
         """
-        Get all imported URLs.
+        Process all unprocessed URLs and extract their text.
         
         Returns:
-            List[dict]: List of URL dictionaries
+            List[Dict]: List of processed URLs with their extracted text and metadata
         """
-        return self._load_urls() 
+        unprocessed_urls = self.get_unprocessed_urls()
+        if not unprocessed_urls:
+            logger.info("No unprocessed URLs to process")
+            return []
+
+        scraper = ObituaryScraper(timeout=self.timeout)
+        processed = []
+
+        for entry in unprocessed_urls:
+            url = entry["url"]
+            logger.info(f"Processing URL: {url}")
+            
+            result = scraper.extract_legacy_com(url)
+            if result:
+                self.update_url_status(
+                    url=url,
+                    status="completed",
+                    extracted_text=result["text"],
+                    metadata=result["metadata"]
+                )
+                processed.append({
+                    "url": url,
+                    "text": result["text"],
+                    "metadata": result["metadata"]
+                })
+            else:
+                self.update_url_status(url=url, status="failed")
+                logger.error(f"Failed to extract text from URL: {url}")
+
+        return processed 

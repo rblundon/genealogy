@@ -1,0 +1,5 @@
+2025-05-29 21:39:12,812 - genealogy_mapper - INFO - Starting Genealogy Mapper
+2025-05-29 21:39:12,814 - genealogy_mapper - INFO - Attempting to import URL: https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788
+2025-05-29 21:39:14,342 - genealogy_mapper - INFO - URL validation successful: https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788
+2025-05-29 21:39:14,345 - genealogy_mapper - WARNING - URL already exists in database: https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788
+2025-05-29 21:39:14,346 - genealogy_mapper - ERROR - URL import failed

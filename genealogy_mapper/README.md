@@ -1,71 +1,48 @@
 # Genealogy Mapper
 
-A Python-based tool for processing and managing genealogy data, with a focus on obituaries and family relationships.
+A tool for processing and managing obituary URLs for genealogy research.
 
 ## Features
 
-- Import obituary URLs from various sources
-- Validate and store URLs in a structured JSON format
-- Process and extract information from obituaries
-- Manage family relationships and connections
+- Import and validate obituary URLs
+- Store URLs in a structured JSON format
+- Comprehensive logging (both info and debug levels)
+- Command-line interface
 
 ## Installation
 
-1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/genealogy.git
-cd genealogy/genealogy_mapper
-```
+# Create and activate a virtual environment
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
 
-2. Create and activate a virtual environment:
-```bash
-python -m venv .genealogy-env
-source .genealogy-env/bin/activate  # On Unix/macOS
-# or
-.genealogy-env\Scripts\activate  # On Windows
-```
-
-3. Install dependencies:
-```bash
-# Install core dependencies
-pip install -r requirements.txt
-
-# Install development dependencies (optional)
-pip install -r requirements-dev.txt
-
-# Install the package in development mode
+# Install the package
 pip install -e .
 ```
 
 ## Usage
 
-### Importing URLs
-
-To import an obituary URL:
+### Import a URL
 
 ```bash
+# Basic usage
 genealogy-mapper --import-url "https://www.legacy.com/us/obituaries/example"
-```
 
-For debug output:
-
-```bash
+# With debug logging
 genealogy-mapper --debug --import-url "https://www.legacy.com/us/obituaries/example"
 ```
 
-### Development
+### Logging
 
-Run tests:
-```bash
-pytest -v
-```
+The tool provides two levels of logging:
+- Info level: Basic operation information (default)
+- Debug level: Detailed debugging information (enabled with --debug flag)
 
-Run tests with coverage:
-```bash
-pytest --cov=genealogy_mapper --cov-report=term-missing
-```
+Logs are stored in the `logs` directory.
 
-## Project Structure
+## Development
+
+### Project Structure
 
 ```
 genealogy_mapper/
@@ -73,31 +50,20 @@ genealogy_mapper/
 │   └── genealogy_mapper/
 │       ├── core/
 │       │   └── url_importer.py
+│       ├── utils/
+│       │   └── logging_config.py
 │       └── cli.py
 ├── tests/
-│   └── core/
-│       └── test_url_importer.py
-├── requirements.txt
-├── requirements-dev.txt
+├── pyproject.toml
 └── README.md
 ```
 
-## Dependencies
+### Running Tests
 
-### Core Dependencies
-- requests: For making HTTP requests
-- validators: For URL validation
-- python-dateutil: For date handling
-- rich: For terminal formatting
+```bash
+# Install development dependencies
+pip install -e ".[dev]"
 
-### Development Dependencies
-- pytest: For testing
-- black: For code formatting
-- flake8: For linting
-- mypy: For type checking
-- pytest-cov: For test coverage
-- pre-commit: For git hooks
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 
+# Run tests
+pytest
+``` 
