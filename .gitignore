@@ -52,4 +52,4 @@ data/neo4j/
 obituary_urls.json
 processed_obituaries.json
 obituary_people.json
-config.yaml
+config.yaml.env
