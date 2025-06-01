@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class DatabaseInitializer:
     """Handles Neo4j database initialization and schema setup."""
 
-    def __init__(self, db_directory: Optional[str] = None, config_path: Optional[str] = None):
+    def __init__(self, db_directory: Optional[str] = None, config_path: Optional[str] = None, config_source: Optional[object] = None):
         """Initialize the database initializer.
         
         Args:
@@ -23,9 +23,10 @@ class DatabaseInitializer:
                          will use a default location in the project root.
             config_path: Optional path to config file. If not provided,
                         will look for config.yaml in project root.
+            config_source: Optional configuration source for testing or custom config.
         """
         self.db_directory = self._get_db_directory(db_directory)
-        self.config = Config(config_path)
+        self.config = Config(config_path, config_source=config_source)
         neo4j_config = self.config.get_neo4j_config()
         self.uri = neo4j_config['uri']
         self.user = neo4j_config['user']
@@ -154,15 +155,16 @@ class DatabaseInitializer:
             metadata=metadata
         )
 
-def init_db(db_directory: Optional[str] = None, config_path: Optional[str] = None) -> bool:
+def init_db(db_directory: Optional[str] = None, config_path: Optional[str] = None, config_source: Optional[object] = None) -> bool:
     """Initialize the Neo4j database.
     
     Args:
         db_directory: Optional path to database directory.
         config_path: Optional path to config file.
+        config_source: Optional configuration source for testing or custom config.
         
     Returns:
         bool: True if initialization was successful, False otherwise.
     """
-    initializer = DatabaseInitializer(db_directory, config_path)
+    initializer = DatabaseInitializer(db_directory, config_path, config_source=config_source)
     return initializer.initialize_database() 

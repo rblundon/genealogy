@@ -14,65 +14,104 @@ A tool for processing and managing obituary URLs for genealogy research.
 - Debug HTML saving for troubleshooting
 - Configurable obituaries file location
 
-## Installation
+## Setup
 
-```bash
-# Create and activate a virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+1. Create and activate a virtual environment:
 
-# Install the package
-pip install -e .
-```
+    ```bash
+    # Create virtual environment
+    python -m venv .genealogy-env
 
-## Usage
+    # Activate virtual environment
+    # On macOS/Linux:
+    source .genealogy-env/bin/activate
+    # On Windows:
+    .genealogy-env\Scripts\activate
+    ```
 
-### Import a URL
+2. Install dependencies:
 
-```bash
-# Basic usage
-python -m genealogy_mapper import-url "https://www.legacy.com/us/obituaries/example"
+    ```bash
+    pip install -r requirements.txt
+    ```
 
-# With debug logging
-python -m genealogy_mapper --debug import-url "https://www.legacy.com/us/obituaries/example"
+3. Set up environment variables:
 
-# With custom timeout (in seconds)
-python -m genealogy_mapper --timeout 30 import-url "https://www.legacy.com/us/obituaries/example"
+   The application requires several environment variables to be set. You can set these in your shell or create a `.env` file in the project root:
 
-# With custom obituaries file location
-python -m genealogy_mapper --obituaries-file /path/to/obituary_urls.json import-url "https://www.legacy.com/us/obituaries/example"
-```
+   ```bash
+   # OpenAI API key for text extraction
+   export OPENAI_API_KEY='your-api-key-here'
 
-### Extract Obituary Text
+   # Neo4j database credentials
+   export NEO4J_URI='bolt://localhost:7687'
+   export NEO4J_USER='neo4j'
+   export NEO4J_PASSWORD='your-secure-password-here'
 
-```bash
-# Process pending URLs
-python -m genealogy_mapper extract-obit-text
+   # Optional: Debug logging (set to DEBUG for verbose output)
+   export LOG_LEVEL='INFO'
+   ```
 
-# Force reprocess all URLs
-python -m genealogy_mapper --force-rescrape extract-obit-text
+   Or create a `.env` file:
 
-# With custom obituaries file location
-python -m genealogy_mapper --obituaries-file /path/to/obituary_urls.json extract-obit-text
-```
+   ```plaintext
+   OPENAI_API_KEY=your-api-key-here
+   NEO4J_URI=bolt://localhost:7687
+   NEO4J_USER=neo4j
+   NEO4J_PASSWORD=your-secure-password-here
+   LOG_LEVEL=INFO
+   ```
 
-### Global Options
+   Note: The `.env` file should be added to `.gitignore` to prevent committing sensitive information.
 
-The following options can be used with any command:
+4. **Neo4j Database**
 
-- `--timeout`: Set custom timeout in seconds (default: 3)
-- `--obituaries-file`: Specify custom location for the obituary URLs JSON file (default: project root/obituary_urls.json)
-- `--debug`: Enable debug logging
-- `--force-rescrape`: Process all URLs regardless of status
+   The application uses Neo4j as its database. You can manage the Neo4j container using the provided script:
 
-### Logging
+   ```bash
+   # Check the status of the Neo4j container
+   python scripts/manage_neo4j.py status
 
-The tool provides two levels of logging:
+   # Start the Neo4j container
+   python scripts/manage_neo4j.py start
 
-- Info level: Basic operation information (default)
-- Debug level: Detailed debugging information (enabled with --debug flag)
+   # Stop the Neo4j container
+   python scripts/manage_neo4j.py stop
 
-Logs are stored in the `logs` directory.
+   # Remove the Neo4j container
+   python scripts/manage_neo4j.py remove
+   ```
+
+   The Neo4j container exposes the following endpoints:
+
+   - Browser Interface: <http://localhost:7474>
+   - Bolt Connection: bolt://localhost:7687
+
+   Default credentials:
+   - Username: `neo4j`
+   - Password: `********` (See config.yaml)
+
+5. **Configuration**
+
+   The application uses a `config.yaml` file for configuration. Ensure this file is present in the project root with the following structure:
+
+   ```yaml
+   # Neo4j Configuration
+   neo4j:
+     uri: bolt://localhost:7687
+     user: neo4j
+     password: your-secure-password-here
+   ```
+
+6. **Running Tests**
+
+   To run the tests, execute:
+
+   ```bash
+   python -m pytest
+   ```
+
+   This will also verify that the Neo4j container is running and accessible.
 
 ## Development
 
@@ -118,7 +157,13 @@ pytest -v
 ### Debug HTML
 
 When running with debug logging enabled, the tool saves the full HTML of scraped pages to:
-```
+
+```plaintext
 src/genealogy_mapper/debug/legacyscraper_page.html
 ```
+
 This is useful for troubleshooting scraping issues.
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
