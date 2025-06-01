@@ -11,16 +11,35 @@ setup(
         "python-dateutil>=2.8.2",
         "rich>=13.7.0",
         "beautifulsoup4>=4.12.3",
-        "click>=8.1.7"
+        "click>=8.1.7",
+        "selenium>=4.1.0",
+        "webdriver-manager>=3.5.2",
+        "playwright>=1.42.0",
+        "neo4j>=5.17.0",
+        "openai>=1.0.0",
+        "PyYAML>=6.0.1",
+        "python-dotenv>=1.0.0",
+        "spacy>=3.7.0"
     ],
+    extras_require={
+        'dev': [
+            "pytest>=8.0.0",
+            "pytest-selenium>=4.0.0",
+            "black>=23.0.0",
+            "flake8>=6.0.0",
+            "mypy>=1.0.0",
+            "pytest-cov>=4.0.0",
+            "pre-commit>=3.0.0"
+        ]
+    },
     entry_points={
         "console_scripts": [
             "genealogy-mapper=genealogy_mapper.cli:cli",
         ],
     },
     python_requires=">=3.8",
-    author="Your Name",
-    author_email="your.email@example.com",
+    author="Ryan Blundon",
+    author_email="ryan.blundon@protonmail.com",
     description="A tool for processing and managing genealogy data",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

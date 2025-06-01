@@ -2,17 +2,17 @@
   "urls": [
     {
       "url": "https://www.legacy.com/us/obituaries/jsonline/name/maxine-kaczmarowski-obituary?id=3326788",
-      "status": "failed",
-      "extracted_text": null,
+      "status": "completed",
+      "extracted_text": "Kaczmarowski, Maxine V. (NEE Paradowski) Reunited with her husband Terrence and daughter Patricia on May 24, 2018 at the age of 87 years. Survived by her faithful son-in-law Steve Blundon; grandchildr",
       "metadata": {
-        "name": "Unknown",
+        "name": "Maxine Kaczmarowski",
         "birth_date": "Unknown",
         "death_date": "Unknown",
-        "newspaper": "Unknown",
+        "newspaper": "Legacy",
         "location": "Unknown",
-        "publication_date": "Unknown"
+        "publication_date": "2018-05-27T00:00:00.000Z"
       }
     }
   ],
-  "last_updated": "2025-05-30T21:53:44.077050"
-}
+  "last_updated": "2025-05-31T21:15:19.298227"
+} 

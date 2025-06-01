@@ -5,7 +5,7 @@ from rich.logging import RichHandler
 from .core.url_importer import URLImporter
 from .core.db_init import init_db
 from .core.config import Config
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set, Tuple
 import sys
 import json
 from pathlib import Path
@@ -14,6 +14,8 @@ from .core.hybrid_processor import HybridProcessor
 from .core.neo4j_ops import Neo4jOperations, Conflict, ConflictResolution
 import os
 from datetime import datetime
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
+import importlib
 
 # Set up logging
 logging.basicConfig(
@@ -50,6 +52,17 @@ def format_for_neo4j(person_info: Dict[str, Any]) -> Dict[str, Any]:
             person_info['death_date'] = death_date.isoformat()
         except ValueError:
             pass
+    
+    # Normalize gender
+    if person_info.get('gender'):
+        gender = person_info['gender'].lower()
+        valid_genders = {
+            'm': 'M', 'male': 'M',
+            'f': 'F', 'female': 'F',
+            'u': 'U', 'unknown': 'U'
+        }
+        if gender in valid_genders:
+            person_info['gender'] = valid_genders[gender]
     
     # Add metadata about data quality
     person_info['data_quality'] = {
@@ -125,17 +138,292 @@ def import_url(ctx, import_url):
     else:
         logger.error("URL import failed")
 
+def validate_obituary_json(data: Dict[str, Any]) -> List[str]:
+    """Validate the structure of the obituary URLs JSON file."""
+    errors = []
+    
+    # Check top-level structure
+    if not isinstance(data, dict):
+        errors.append("JSON must be an object")
+        return errors
+        
+    if 'urls' not in data:
+        errors.append("Missing required field: 'urls'")
+        return errors
+        
+    if not isinstance(data['urls'], list):
+        errors.append("'urls' must be an array")
+        return errors
+        
+    # Validate each URL entry
+    for i, url_entry in enumerate(data['urls']):
+        if not isinstance(url_entry, dict):
+            errors.append(f"URL entry {i} must be an object")
+            continue
+            
+        # Required fields
+        if 'url' not in url_entry:
+            errors.append(f"URL entry {i} missing required field: 'url'")
+        elif not isinstance(url_entry['url'], str):
+            errors.append(f"URL entry {i}: 'url' must be a string")
+            
+        if 'status' not in url_entry:
+            errors.append(f"URL entry {i} missing required field: 'status'")
+        elif url_entry['status'] not in ['pending', 'completed', 'failed']:
+            errors.append(f"URL entry {i}: 'status' must be one of: pending, completed, failed")
+            
+        # Optional fields
+        if 'extracted_text' in url_entry and not isinstance(url_entry['extracted_text'], (str, type(None))):
+            errors.append(f"URL entry {i}: 'extracted_text' must be a string or null")
+            
+        if 'metadata' in url_entry:
+            if not isinstance(url_entry['metadata'], dict):
+                errors.append(f"URL entry {i}: 'metadata' must be an object")
+            else:
+                for key, value in url_entry['metadata'].items():
+                    if not isinstance(value, (str, type(None))):
+                        errors.append(f"URL entry {i}: metadata field '{key}' must be a string or null")
+    
+    return errors
+
+def check_dependencies() -> Tuple[bool, List[str]]:
+    """Check if all required dependencies are installed."""
+    required_packages = {
+        'selenium': 'selenium',
+        'playwright': 'playwright',
+        'beautifulsoup4': 'bs4',
+        'requests': 'requests',
+        'neo4j': 'neo4j',
+        'openai': 'openai',
+        'spacy': 'spacy',
+        'rich': 'rich'
+    }
+    
+    missing_packages = []
+    for package, import_name in required_packages.items():
+        try:
+            importlib.import_module(import_name)
+        except ImportError:
+            missing_packages.append(package)
+    
+    # Check if Playwright browsers are installed
+    if 'playwright' not in missing_packages:
+        try:
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as p:
+                browsers = p.chromium, p.firefox, p.webkit
+                for browser in browsers:
+                    try:
+                        browser.launch()
+                    except Exception:
+                        missing_packages.append('playwright-browsers')
+                        break
+        except Exception:
+            missing_packages.append('playwright-browsers')
+    
+    return len(missing_packages) == 0, missing_packages
+
+def setup_logging(verbose: bool = False) -> None:
+    """Set up logging with appropriate level and format."""
+    log_level = logging.DEBUG if verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        datefmt="[%X]",
+        handlers=[RichHandler(rich_tracebacks=True)]
+    )
+
 @cli.command()
-@click.pass_context
-def extract_obit_text(ctx):
-    """Process all pending URLs and extract their text."""
-    logger.info("Processing pending obituary URLs...")
-    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=ctx.obj['json_path'])
-    processed = importer.process_pending_urls()
-    if processed:
-        logger.info(f"Successfully processed {len(processed)} URLs")
-    else:
-        logger.info("No URLs were processed")
+@click.option(
+    "--timeout",
+    type=int,
+    default=3,
+    help="Timeout in seconds for web scraping operations",
+)
+@click.option(
+    "--obituaries-file",
+    "-i",
+    "--input-file",
+    type=click.Path(exists=True),
+    required=True,
+    help="Path to the obituary URLs JSON file",
+)
+@click.option(
+    "--force-rescrape",
+    is_flag=True,
+    help="Force rescrape of all URLs regardless of status",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Show what would be processed without making changes",
+)
+@click.option(
+    "--verbose",
+    "-v",
+    is_flag=True,
+    help="Enable verbose logging",
+)
+def extract_obit_text(
+    timeout: int,
+    obituaries_file: str,
+    force_rescrape: bool,
+    dry_run: bool,
+    verbose: bool
+) -> None:
+    """Extract text from pending obituary URLs."""
+    try:
+        # Set up logging
+        setup_logging(verbose)
+        logger = logging.getLogger("genealogy_mapper")
+        
+        # Validate and normalize file path
+        try:
+            file_path = os.path.abspath(obituaries_file)
+            logger.info(f"Using obituary file: {file_path}")
+            
+            # Check if file is writable
+            if not os.access(file_path, os.W_OK):
+                logger.error(f"File is not writable: {file_path}")
+                click.echo(f"Error: File is not writable: {file_path}", err=True)
+                raise click.Abort()
+                
+            # Check if file is in a safe location (not system directories)
+            system_dirs = ['/bin', '/sbin', '/usr', '/etc', '/var', '/opt']
+            if any(file_path.startswith(d) for d in system_dirs):
+                logger.error(f"File path is in a system directory: {file_path}")
+                click.echo(f"Error: File path is in a system directory: {file_path}", err=True)
+                raise click.Abort()
+                
+        except Exception as e:
+            logger.error(f"Error validating file path: {str(e)}")
+            click.echo(f"Error validating file path: {str(e)}", err=True)
+            raise click.Abort()
+        
+        # Check dependencies
+        deps_ok, missing = check_dependencies()
+        if not deps_ok:
+            click.echo("Error: Missing required dependencies:", err=True)
+            for package in missing:
+                click.echo(f"  - {package}", err=True)
+            click.echo("\nInstall missing dependencies with:", err=True)
+            if 'playwright-browsers' in missing:
+                click.echo("pip install playwright", err=True)
+                click.echo("playwright install", err=True)
+            else:
+                click.echo(f"pip install {' '.join(missing)}", err=True)
+            raise click.Abort()
+        
+        # Load and validate JSON file
+        try:
+            logger.debug(f"Loading JSON file: {file_path}")
+            with open(file_path, 'r') as f:
+                data = json.load(f)
+            logger.info(f"Successfully loaded JSON file with {len(data.get('urls', []))} URLs")
+        except json.JSONDecodeError as e:
+            logger.error(f"Invalid JSON file: {str(e)}")
+            click.echo(f"Error: Invalid JSON file: {str(e)}", err=True)
+            raise click.Abort()
+        except FileNotFoundError:
+            logger.error(f"File not found: {file_path}")
+            click.echo(f"Error: File not found: {file_path}", err=True)
+            raise click.Abort()
+            
+        # Validate JSON structure
+        logger.debug("Validating JSON structure")
+        errors = validate_obituary_json(data)
+        if errors:
+            logger.error("Invalid JSON structure")
+            click.echo("Error: Invalid JSON structure:", err=True)
+            for error in errors:
+                click.echo(f"  - {error}", err=True)
+            raise click.Abort()
+        
+        # Load configuration
+        try:
+            logger.debug("Loading configuration")
+            config = Config()
+            neo4j_config = config.get_neo4j_config()
+        except Exception as e:
+            logger.error(f"Error loading configuration: {str(e)}")
+            click.echo(f"Error loading configuration: {str(e)}", err=True)
+            click.echo("Try running 'create-config' first", err=True)
+            raise click.Abort()
+        
+        # Initialize URL importer with timeout
+        try:
+            logger.debug(f"Initializing URL importer with timeout={timeout}")
+            importer = URLImporter(
+                timeout=timeout,
+                json_path=file_path,
+                force_rescrape=force_rescrape
+            )
+        except Exception as e:
+            logger.error(f"Error initializing URL importer: {str(e)}")
+            click.echo(f"Error initializing URL importer: {str(e)}", err=True)
+            raise click.Abort()
+        
+        # Count URLs to process
+        urls_to_process = [
+            url for url in data['urls']
+            if force_rescrape or url['status'] == 'pending'
+        ]
+        
+        if not urls_to_process:
+            logger.info("No URLs to process")
+            click.echo("No URLs to process")
+            return
+            
+        # Show dry run information
+        if dry_run:
+            click.echo("\n[bold blue]Dry Run Mode[/bold blue]")
+            click.echo(f"Would process {len(urls_to_process)} URLs:")
+            for url in urls_to_process:
+                click.echo(f"  - {url['url']} (current status: {url['status']})")
+            click.echo("\nNo changes will be made.")
+            return
+            
+        # Process URLs with progress bar
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeRemainingColumn(),
+            console=console
+        ) as progress:
+            task = progress.add_task(
+                f"Processing {len(urls_to_process)} URLs...",
+                total=len(urls_to_process)
+            )
+            
+            def progress_callback(url: str, status: str) -> None:
+                progress.update(task, advance=1)
+                progress.print(f"Processed: {url} ({status})")
+                logger.debug(f"Processed URL: {url} ({status})")
+            
+            try:
+                # Process pending URLs with progress tracking
+                logger.info(f"Starting URL processing (force_rescrape={force_rescrape})")
+                importer.process_pending_urls(
+                    obituaries_file=obituaries_file,
+                    force_rescrape=force_rescrape,
+                    progress_callback=progress_callback
+                )
+            except Exception as e:
+                logger.error(f"Error processing URLs: {str(e)}")
+                click.echo(f"\nError processing URLs: {str(e)}", err=True)
+                raise click.Abort()
+        
+        logger.info("Text extraction completed successfully")
+        click.echo("\nText extraction completed successfully")
+        
+    except click.Abort:
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error: {str(e)}", exc_info=True)
+        click.echo(f"Unexpected error: {str(e)}", err=True)
+        raise click.Abort()
 
 @cli.command()
 @click.option('--db-directory', type=click.Path(), help='Path to Neo4j database directory (default: project_root/data/neo4j)')
@@ -149,10 +437,16 @@ def init_database(db_directory: Optional[str] = None, config_path: Optional[str]
 def create_config(config_path: Optional[str] = None):
     """Create a default configuration file."""
     try:
+        # If no config path is provided, use the default location
+        if config_path is None:
+            config_path = str(Path(__file__).parent.parent.parent / 'config.yaml')
+        
         Config.create_default_config(config_path)
-        logger.info("Default configuration file created successfully")
+        logger.info(f"Default configuration file created successfully at {config_path}")
+        click.echo(f"Configuration file created at: {config_path}")
     except Exception as e:
         logger.error(f"Failed to create configuration file: {e}")
+        click.echo(f"Error: Failed to create configuration file: {e}", err=True)
         sys.exit(1)
 
 @cli.command()

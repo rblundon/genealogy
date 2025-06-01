@@ -1,5 +1,54 @@
 # Genealogy Mapper Design Decisions
 
+## Markdown Standards
+
+This document follows standard markdown formatting:
+
+1. **Headers**
+   - Use `#` for main title
+   - Use `##` for section headers
+   - Use `###` for subsections
+   - Add a blank line before and after headers
+
+2. **Lists**
+   - Use `-` for unordered lists
+   - Use `1.` for ordered lists
+   - Indent nested lists with 2 spaces
+   - Add a blank line before and after lists
+
+3. **Code Blocks**
+   - Use triple backticks with language specification
+   - Add a blank line before and after code blocks
+   - Example:
+     ```python
+     def example():
+         pass
+     ```
+
+4. **Inline Code**
+   - Use single backticks for inline code
+   - Example: `variable_name`
+
+5. **Links**
+   - Use `[text](url)` format
+   - Add a blank line before and after link blocks
+
+6. **Tables**
+   - Use `|` for column separation
+   - Use `-` for header separation
+   - Example:
+     | Column 1 | Column 2 |
+     |----------|----------|
+     | Value 1  | Value 2  |
+
+7. **Blockquotes**
+   - Use `>` for blockquotes
+   - Add a blank line before and after
+
+8. **Horizontal Rules**
+   - Use `---` for horizontal rules
+   - Add a blank line before and after
+
 ## Data Storage
 
 ### JSON File Location
@@ -126,3 +175,143 @@
 - Add support for more obituary websites
 - Create new scraper implementations
 - Add source-specific metadata extraction
+
+## Configuration
+
+### Timeouts
+
+- Default timeout: 3 seconds
+- Configurable per operation
+- Affects:
+  - Page loading
+  - Element waiting
+  - API calls
+- Recommended values:
+  - Fast sites: 3-5 seconds
+  - Medium sites: 5-10 seconds
+  - Slow sites: 10-30 seconds
+
+### Conflict Resolution
+
+The system implements a sophisticated conflict resolution system for handling data inconsistencies:
+
+1. **Detection**
+   - Compares new data with existing records
+   - Identifies conflicts in:
+     - Dates
+     - Names
+     - Places
+     - Relationships
+
+2. **Resolution Strategies**
+   - Keep Existing: Preserve current data
+   - Use New: Replace with new data
+   - Merge: Combine data intelligently
+   - Skip: No update
+
+3. **Interactive Mode**
+   - User-guided resolution
+   - Preview of changes
+   - Batch resolution options
+
+4. **Validation**
+   - Data format checking
+   - Consistency verification
+   - Quality metrics
+
+## Data Model
+
+### Neo4j Schema
+
+1. **Nodes**
+   - Individual
+     - Properties: `id`, `name`, `birth_date`, `death_date`, `gender`
+     - Metadata: `created_at`, `updated_at`, `data_quality`
+   - Source
+     - Properties: `id`, `title`, `url`, `type`
+     - Metadata: `created_at`, `updated_at`
+   - Place
+     - Properties: `id`, `name`, `type`, `coordinates`
+     - Metadata: `created_at`, `updated_at`
+
+2. **Relationships**
+   - CITED_IN
+     - Properties: `confidence`, `source`
+     - Metadata: `created_at`
+   - BORN_IN
+     - Properties: `date`
+     - Metadata: `created_at`
+   - DIED_IN
+     - Properties: `date`
+     - Metadata: `created_at`
+   - RELATED_TO
+     - Properties: `relationship_type`
+     - Metadata: `created_at`
+
+## Implementation Details
+
+### Web Scraping
+
+1. **Timeout Handling**
+   ```python
+   def process_url(url: str, timeout: int = 3):
+       try:
+           # Set page load timeout
+           page.set_default_timeout(timeout)
+           # Wait for content
+           page.wait_for_selector('.content', timeout=timeout)
+       except TimeoutError:
+           logger.warning(f"Timeout after {timeout} seconds")
+           return None
+   ```
+
+2. **Error Recovery**
+   - Automatic retries
+   - Fallback strategies
+   - Error logging
+
+### Data Processing
+
+1. **Hybrid Processing**
+   ```python
+   class HybridProcessor:
+       def extract_info(self, text: str) -> PersonInfo:
+           # NER processing
+           ner_results = self.ner_processor.process(text)
+           # OpenAI processing
+           ai_results = self.openai_processor.process(text)
+           # Merge results
+           return self.merge_results(ner_results, ai_results)
+   ```
+
+2. **Conflict Resolution**
+   ```python
+   class ConflictResolver:
+       def resolve(self, existing: Dict, new: Dict) -> Dict:
+           conflicts = self.detect_conflicts(existing, new)
+           if self.interactive:
+               return self.interactive_resolve(conflicts)
+           return self.auto_resolve(conflicts)
+   ```
+
+## Future Enhancements
+
+1. **Performance**
+   - Parallel processing
+   - Caching system
+   - Optimized timeouts
+
+2. **Data Quality**
+   - Enhanced validation
+   - Confidence scoring
+   - Source reliability tracking
+
+3. **User Interface**
+   - Web interface
+   - Batch operations
+   - Progress tracking
+
+4. **Integration**
+   - GEDCOM import/export
+   - DNA data integration
+   - External API support

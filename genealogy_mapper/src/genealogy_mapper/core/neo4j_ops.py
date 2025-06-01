@@ -83,8 +83,18 @@ class Neo4jOperations:
                     errors.append(f"Invalid {date_field} format: {person_info[date_field]}")
                     
         # Gender validation
-        if person_info.get('gender') and person_info['gender'] not in ['M', 'F', 'U']:
-            errors.append(f"Invalid gender: {person_info['gender']}")
+        if person_info.get('gender'):
+            gender = person_info['gender'].lower()
+            valid_genders = {
+                'm': 'M', 'male': 'M',
+                'f': 'F', 'female': 'F',
+                'u': 'U', 'unknown': 'U'
+            }
+            if gender not in valid_genders:
+                errors.append(f"Invalid gender: {person_info['gender']}")
+            else:
+                # Normalize gender to single letter
+                person_info['gender'] = valid_genders[gender]
             
         # Data quality warnings
         if person_info.get('data_quality', {}).get('birth_year_calculated'):
