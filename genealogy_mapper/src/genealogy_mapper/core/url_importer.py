@@ -1,7 +1,7 @@
 import json
 import logging
 import os
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Callable
 import requests
 import validators
 from datetime import datetime
@@ -18,7 +18,7 @@ def get_project_root() -> str:
 class URLImporter:
     """Class for importing and managing obituary URLs."""
     
-    def __init__(self, json_path: Optional[str] = None, timeout: int = 3, force_rescrape: bool = False):
+    def __init__(self, json_path: Optional[str] = None, timeout: int = 5, force_rescrape: bool = False):
         """
         Initialize the URL importer.
         
@@ -42,12 +42,42 @@ class URLImporter:
     def _ensure_json_file(self) -> None:
         """Ensure the JSON file exists with proper structure."""
         if not os.path.exists(self.json_path):
-            initial_data = {
+            default_data = {
                 "urls": [],
                 "last_updated": datetime.now().isoformat()
             }
             with open(self.json_path, 'w') as f:
-                json.dump(initial_data, f, indent=2)
+                json.dump(default_data, f, indent=2)
+        else:
+            # Validate and fix existing file structure
+            try:
+                with open(self.json_path, 'r') as f:
+                    data = json.load(f)
+                
+                # Ensure required fields exist
+                if 'urls' not in data:
+                    data['urls'] = []
+                if 'last_updated' not in data:
+                    data['last_updated'] = datetime.now().isoformat()
+                
+                # Update each URL entry to include new fields
+                for url_entry in data['urls']:
+                    if 'status' not in url_entry:
+                        url_entry['status'] = 'pending'
+                    if 'relationships_extracted' not in url_entry:
+                        url_entry['relationships_extracted'] = {
+                            'status': 'pending',  # pending, completed, failed
+                            'last_attempt': None,
+                            'error': None
+                        }
+                
+                # Write back the updated structure
+                with open(self.json_path, 'w') as f:
+                    json.dump(data, f, indent=2)
+                    
+            except json.JSONDecodeError:
+                logger.warning(f"Could not read {self.json_path}, creating new file")
+                self._ensure_json_file()
     
     def _migrate_old_data(self) -> None:
         """Migrate old data format to new format."""
@@ -157,8 +187,9 @@ class URLImporter:
                 # Return all URLs if force_rescrape is True
                 return data.get("urls", [])
             else:
-                # Return only URLs that haven't been successfully processed
-                return [url for url in data.get("urls", []) if url.get("status") != "completed"]
+                # Return URLs that haven't been successfully processed (pending or failed)
+                return [url for url in data.get("urls", []) 
+                       if url.get("status") in ["pending", "failed"]]
                 
         except Exception as e:
             logger.error(f"Error reading URLs: {str(e)}")
@@ -178,10 +209,14 @@ class URLImporter:
                 return True
         return False
 
-    def process_pending_urls(self) -> List[Dict]:
+    def process_pending_urls(self, force_rescrape: bool = False, progress_callback: Optional[Callable[[str, str], None]] = None) -> List[Dict]:
         """
         Process all unprocessed URLs and extract their text.
         
+        Args:
+            force_rescrape (bool): If True, process all URLs even if they have "completed" status
+            progress_callback (Optional[Callable[[str, str], None]]): Callback function to report progress
+            
         Returns:
             List[Dict]: List of processed URLs with their extracted text and metadata
         """
@@ -201,6 +236,8 @@ class URLImporter:
             if not scraper:
                 logger.error(f"No suitable scraper found for URL: {url}")
                 self.update_url_status(url=url, status="failed")
+                if progress_callback:
+                    progress_callback(url, "failed")
                 continue
             
             result = scraper.extract(url)
@@ -216,8 +253,12 @@ class URLImporter:
                     "text": result["text"],
                     "metadata": result["metadata"]
                 })
+                if progress_callback:
+                    progress_callback(url, "completed")
             else:
                 self.update_url_status(url=url, status="failed")
                 logger.error(f"Failed to extract text from URL: {url}")
+                if progress_callback:
+                    progress_callback(url, "failed")
 
         return processed 

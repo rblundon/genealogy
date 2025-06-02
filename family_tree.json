@@ -1,0 +1,179 @@
+{
+  "nodes": [
+    {
+      "id": 35,
+      "label": "Maxine V. Kaczmarowski",
+      "properties": {
+        "updated_at": "2025-06-01T18:19:24.502812",
+        "birth_date": "1931-01-01T00:00:00",
+        "sex": "F",
+        "name": "Maxine V. Kaczmarowski",
+        "created_at": "2025-05-31T22:05:38.546854",
+        "id": "Ib3878d7c",
+        "death_date": "2018-05-24T00:00:00"
+      }
+    },
+    {
+      "id": 55,
+      "label": "Maxine V",
+      "properties": {
+        "name": "Maxine V",
+        "id": "I0001"
+      }
+    },
+    {
+      "id": 56,
+      "label": "Maxine V",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Maxine V",
+        "id": "I0002",
+        "death_date": "May 24, 2018"
+      }
+    },
+    {
+      "id": 57,
+      "label": "Terrence Kaczmarowski",
+      "properties": {
+        "birth_date": "(not provided)",
+        "sex": "Male",
+        "name": "Terrence Kaczmarowski",
+        "id": "I0003",
+        "death_date": "(not provided)"
+      }
+    },
+    {
+      "id": 58,
+      "label": "Patricia Kaczmarowski",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Patricia Kaczmarowski",
+        "id": "I0004",
+        "death_date": "(not provided)"
+      }
+    },
+    {
+      "id": 59,
+      "label": "Steve Blundon",
+      "properties": {
+        "sex": "Male",
+        "birth_date": "(not provided)",
+        "name": "Steve Blundon",
+        "id": "I0005"
+      }
+    },
+    {
+      "id": 60,
+      "label": "Ryan Blundon",
+      "properties": {
+        "sex": "Male",
+        "birth_date": "(not provided)",
+        "name": "Ryan Blundon",
+        "id": "I0006"
+      }
+    },
+    {
+      "id": 61,
+      "label": "Amy Blundon",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Amy Blundon",
+        "id": "I0007"
+      }
+    },
+    {
+      "id": 62,
+      "label": "Megan Wurz",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Megan Wurz",
+        "id": "I0008"
+      }
+    },
+    {
+      "id": 63,
+      "label": "Ross Wurz",
+      "properties": {
+        "sex": "Male",
+        "birth_date": "(not provided)",
+        "name": "Ross Wurz",
+        "id": "I0009"
+      }
+    },
+    {
+      "id": 64,
+      "label": "Autumn",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Autumn",
+        "id": "I0010"
+      }
+    },
+    {
+      "id": 65,
+      "label": "Caralyn",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Caralyn",
+        "id": "I0011"
+      }
+    },
+    {
+      "id": 66,
+      "label": "Finley",
+      "properties": {
+        "sex": "Male",
+        "birth_date": "(not provided)",
+        "name": "Finley",
+        "id": "I0012"
+      }
+    },
+    {
+      "id": 67,
+      "label": "Reginald Paradowski",
+      "properties": {
+        "birth_date": "(not provided)",
+        "sex": "Male",
+        "name": "Reginald Paradowski",
+        "id": "I0013"
+      }
+    },
+    {
+      "id": 68,
+      "label": "Donna Paradowski",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Donna Paradowski",
+        "id": "I0014"
+      }
+    },
+    {
+      "id": 69,
+      "label": "Joseph Paradowski",
+      "properties": {
+        "birth_date": "(not provided)",
+        "sex": "Male",
+        "name": "Joseph Paradowski",
+        "id": "I0015"
+      }
+    },
+    {
+      "id": 70,
+      "label": "Rosemary Paradowski",
+      "properties": {
+        "sex": "Female",
+        "birth_date": "(not provided)",
+        "name": "Rosemary Paradowski",
+        "id": "I0016"
+      }
+    }
+  ],
+  "edges": []
+}

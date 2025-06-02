@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, Any, Optional
 from abc import ABC, abstractmethod
 import copy
+import logging
 
 class ConfigSource(ABC):
     """Abstract base class for configuration sources."""
@@ -79,7 +80,9 @@ class EnvConfigSource(ConfigSource):
         return self.env.get(key, default)
 
     def get_config(self) -> Dict[str, Any]:
-        # Only include relevant Neo4j keys
+        config = {}
+        
+        # Neo4j configuration
         neo4j_keys = [
             'NEO4J_URI', 'NEO4J_USER', 'NEO4J_PASSWORD',
             'NEO4J_MAX_CONNECTION_LIFETIME', 'NEO4J_MAX_CONNECTION_POOL_SIZE', 'NEO4J_CONNECTION_TIMEOUT'
@@ -99,7 +102,30 @@ class EnvConfigSource(ConfigSource):
                 }
                 config_key = key_map.get(k, k)
                 neo4j_config[config_key] = val
-        return {'neo4j': neo4j_config} if neo4j_config else {}
+        if neo4j_config:
+            config['neo4j'] = neo4j_config
+            
+        # OpenAI configuration
+        openai_keys = [
+            'OPENAI_API_KEY', 'OPENAI_MODEL', 'OPENAI_TEMPERATURE', 'OPENAI_MAX_TOKENS'
+        ]
+        openai_config = {}
+        for k in openai_keys:
+            val = self.env.get(k)
+            if val is not None:
+                # Map env var names to config keys
+                key_map = {
+                    'OPENAI_API_KEY': 'api_key',
+                    'OPENAI_MODEL': 'model',
+                    'OPENAI_TEMPERATURE': 'temperature',
+                    'OPENAI_MAX_TOKENS': 'max_tokens'
+                }
+                config_key = key_map.get(k, k)
+                openai_config[config_key] = val
+        if openai_config:
+            config['openai'] = openai_config
+            
+        return config
 
 class FileConfigSource(ConfigSource):
     """Configuration source that reads from YAML files."""
@@ -165,6 +191,11 @@ class Config:
             'max_connection_lifetime': 3600,
             'max_connection_pool_size': 50,
             'connection_timeout': 30
+        },
+        'openai': {
+            'model': 'gpt-3.5-turbo',
+            'temperature': 0.1,
+            'max_tokens': 2000
         }
     }
     
@@ -197,17 +228,32 @@ class Config:
             file_config = self.file_source._load_config()
             if file_config:
                 # Merge file config into default config
-                if 'neo4j' in file_config:
-                    config['neo4j'].update(file_config['neo4j'])
+                for section in ['neo4j', 'openai']:
+                    if section in file_config:
+                        # Deep merge the configurations
+                        if section not in config:
+                            config[section] = {}
+                        for key, value in file_config[section].items():
+                            if value is not None:  # Only update if value is not None
+                                config[section][key] = value
         
         # Override with environment variables if set
         env_config = self.config_source.get_config()
-        if env_config and 'neo4j' in env_config:
-            config['neo4j'].update(env_config['neo4j'])
+        for section in ['neo4j', 'openai']:
+            if section in env_config:
+                if section not in config:
+                    config[section] = {}
+                for key, value in env_config[section].items():
+                    if value is not None:  # Only update if value is not None
+                        config[section][key] = value
         
         # Ensure Neo4j password is set
         if not config.get("neo4j", {}).get("password"):
             raise ValueError("Neo4j password must be set in config file or NEO4J_PASSWORD environment variable")
+        
+        # Log the final configuration for debugging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"Final configuration: {config}")
         
         return config
     
@@ -234,4 +280,12 @@ class Config:
         """
         os.makedirs(os.path.dirname(config_path), exist_ok=True)
         with open(config_path, 'w') as f:
-            yaml.dump(cls.get_default_config(), f, default_flow_style=False) 
+            yaml.dump(cls.get_default_config(), f, default_flow_style=False)
+
+    def get_openai_config(self) -> Dict[str, Any]:
+        """Get OpenAI configuration.
+        
+        Returns:
+            Dict containing OpenAI API settings.
+        """
+        return self.config.get('openai', {}) 

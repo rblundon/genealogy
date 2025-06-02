@@ -1,168 +1,213 @@
 # Genealogy Mapper
 
-A tool for processing and managing obituary URLs for genealogy research.
+A tool for extracting and analyzing genealogical information from obituaries using Neo4j and OpenAI.
 
 ## Features
 
-- Import and validate obituary URLs
-- Store URLs in a structured JSON format
-- Extract obituary text and metadata using Selenium
-- Support for Legacy.com obituaries
-- Comprehensive logging (both info and debug levels)
-- Command-line interface
-- Force rescrape option for reprocessing URLs
-- Debug HTML saving for troubleshooting
-- Configurable obituaries file location
+- Extract text from obituary URLs
+- Process obituaries to identify people and relationships
+- Store data in Neo4j graph database
+- Visualize family relationships
+- OpenAI-powered relationship analysis
+- Interactive conflict resolution
+- Comprehensive logging and error handling
 
-## Setup
+## Installation
 
-1. Create and activate a virtual environment:
-
-    ```bash
-    # Create virtual environment
-    python -m venv .genealogy-env
-
-    # Activate virtual environment
-    # On macOS/Linux:
-    source .genealogy-env/bin/activate
-    # On Windows:
-    .genealogy-env\Scripts\activate
-    ```
+1. Clone the repository:
+```bash
+git clone https://github.com/yourusername/genealogy-mapper.git
+cd genealogy-mapper
+```
 
 2. Install dependencies:
-
-    ```bash
-    pip install -r requirements.txt
-    ```
+```bash
+pip install -r requirements.txt
+```
 
 3. Set up environment variables:
+```bash
+cp .env.example .env
+# Edit .env with your configuration
+```
 
-   The application requires several environment variables to be set. You can set these in your shell or create a `.env` file in the project root:
+Required environment variables:
+- `NEO4J_URI`: Neo4j database URI (default: bolt://localhost:7687)
+- `NEO4J_USER`: Neo4j username (default: neo4j)
+- `NEO4J_PASSWORD`: Neo4j password
+- `OPENAI_API_KEY`: Your OpenAI API key
 
+## Configuration
+
+The application can be configured through:
+1. Configuration file (config.yaml)
+2. Environment variables
+3. Command-line arguments
+
+### Creating Configuration
+
+Create a default configuration file:
+```bash
+python -m genealogy_mapper.cli create-config
+```
+
+This will create a `config.yaml` file with default settings for both Neo4j and OpenAI.
+
+### Configuration Options
+
+#### Neo4j Configuration
+```yaml
+neo4j:
+  uri: bolt://localhost:7687
+  user: neo4j
+  password: your_password_here
+  max_connection_lifetime: 3600
+  max_connection_pool_size: 50
+  connection_timeout: 30
+```
+
+#### OpenAI Configuration
+```yaml
+openai:
+  api_key: your_openai_api_key_here
+  model: gpt-4-turbo-preview
+  temperature: 0.1
+  max_tokens: 2000
+```
+
+### Environment Variables
+
+You can also set configuration through environment variables:
+
+```bash
+# Neo4j settings
+export NEO4J_URI=bolt://localhost:7687
+export NEO4J_USER=neo4j
+export NEO4J_PASSWORD=your_password
+
+# OpenAI settings
+export OPENAI_API_KEY=your_api_key
+export OPENAI_MODEL=gpt-4-turbo-preview
+export OPENAI_TEMPERATURE=0.1
+export OPENAI_MAX_TOKENS=2000
+```
+
+The configuration is loaded in this order:
+1. Default values
+2. Values from config file
+3. Environment variables (these take precedence)
+
+## Usage
+
+### Basic Workflow
+
+1. **Set up configuration**
    ```bash
-   # OpenAI API key for text extraction
-   export OPENAI_API_KEY='your-api-key-here'
-
-   # Neo4j database credentials
-   export NEO4J_URI='bolt://localhost:7687'
-   export NEO4J_USER='neo4j'
-   export NEO4J_PASSWORD='your-secure-password-here'
-
-   # Optional: Debug logging (set to DEBUG for verbose output)
-   export LOG_LEVEL='INFO'
+   # Create default configuration file
+   python -m genealogy_mapper.cli create-config
+   
+   # Edit config.yaml to add your Neo4j password and OpenAI API key
+   # Or set them as environment variables:
+   export NEO4J_PASSWORD=your_password
+   export OPENAI_API_KEY=your_api_key
    ```
 
-   Or create a `.env` file:
-
-   ```plaintext
-   OPENAI_API_KEY=your-api-key-here
-   NEO4J_URI=bolt://localhost:7687
-   NEO4J_USER=neo4j
-   NEO4J_PASSWORD=your-secure-password-here
-   LOG_LEVEL=INFO
-   ```
-
-   Note: The `.env` file should be added to `.gitignore` to prevent committing sensitive information.
-
-4. **Neo4j Database**
-
-   The application uses Neo4j as its database. You can manage the Neo4j container using the provided script:
-
+2. **Initialize the database**
    ```bash
-   # Check the status of the Neo4j container
-   python scripts/manage_neo4j.py status
-
-   # Start the Neo4j container
-   python scripts/manage_neo4j.py start
-
-   # Stop the Neo4j container
-   python scripts/manage_neo4j.py stop
-
-   # Remove the Neo4j container
-   python scripts/manage_neo4j.py remove
+   python -m genealogy_mapper.cli init-database
    ```
 
-   The Neo4j container exposes the following endpoints:
-
-   - Browser Interface: <http://localhost:7474>
-   - Bolt Connection: bolt://localhost:7687
-
-   Default credentials:
-   - Username: `neo4j`
-   - Password: `********` (See config.yaml)
-
-5. **Configuration**
-
-   The application uses a `config.yaml` file for configuration. Ensure this file is present in the project root with the following structure:
-
-   ```yaml
-   # Neo4j Configuration
-   neo4j:
-     uri: bolt://localhost:7687
-     user: neo4j
-     password: your-secure-password-here
-   ```
-
-6. **Running Tests**
-
-   To run the tests, execute:
-
+3. **Import obituary URLs**
    ```bash
-   python -m pytest
+   python -m genealogy_mapper.cli import-url "https://example.com/obituary"
    ```
 
-   This will also verify that the Neo4j container is running and accessible.
+4. **Extract text from obituaries**
+   ```bash
+   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json
+   ```
+
+5. **Process obituaries to identify people**
+   ```bash
+   python -m genealogy_mapper.cli add-obit-people -i obituary_urls.json
+   ```
+
+6. **Extract relationships using OpenAI**
+   ```bash
+   python -m genealogy_mapper.cli extract-relationships -i obituary_urls.json -o relationships_analysis.json
+   ```
+
+7. **Import relationships into Neo4j**
+   ```bash
+   python -m genealogy_mapper.cli import-relationships -i relationships_analysis.json
+   ```
+
+8. **Visualize the relationship graph**
+   ```bash
+   python -m genealogy_mapper.cli visualize-relationships -o family_tree.png
+   ```
+
+### Advanced Options
+
+#### Interactive Conflict Resolution
+```bash
+python -m genealogy_mapper.cli import-to-neo4j -i obituary_people.json --interactive
+```
+
+#### Dry Run Mode
+```bash
+python -m genealogy_mapper.cli extract-relationships -i obituary_urls.json --dry-run
+```
+
+#### Force Reprocessing
+```bash
+python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json --force-rescrape
+```
+
+### Testing Configuration
+
+Test your OpenAI configuration:
+```bash
+python -m genealogy_mapper.cli test-openai
+```
+
+## Data Model
+
+The application uses a Neo4j graph database with the following structure:
+
+### Nodes
+- Individual (Person)
+- Source (Obituary)
+- Family
+- Repository
+
+### Relationships
+- CITED_IN (Person -> Source)
+- FAMILY (Person -> Family)
+- PARENT_OF (Person -> Person)
+- SPOUSE_OF (Person -> Person)
 
 ## Development
 
-### Project Structure
-
-```plaintext
-genealogy_mapper/
-├── src/
-│   └── genealogy_mapper/
-│       ├── core/
-│       │   ├── scrapers/
-│       │   │   ├── base_scraper.py
-│       │   │   ├── factory.py
-│       │   │   └── legacy_scraper.py
-│       │   └── url_importer.py
-│       ├── utils/
-│       │   └── logging_config.py
-│       └── cli.py
-├── tests/
-│   ├── core/
-│   │   ├── test_obituary_scraper.py
-│   │   └── test_url_importer.py
-│   ├── test_legacy_scraper.py
-│   ├── test_scraper_factory.py
-│   └── test_url_importer.py
-├── pyproject.toml
-└── README.md
-```
-
 ### Running Tests
-
 ```bash
-# Install development dependencies
-pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run tests with verbose output
-pytest -v
+pytest tests/
 ```
 
-### Debug HTML
-
-When running with debug logging enabled, the tool saves the full HTML of scraped pages to:
-
-```plaintext
-src/genealogy_mapper/debug/legacyscraper_page.html
+### Code Style
+```bash
+black src/
+flake8 src/
+mypy src/
 ```
 
-This is useful for troubleshooting scraping issues.
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ## License
 

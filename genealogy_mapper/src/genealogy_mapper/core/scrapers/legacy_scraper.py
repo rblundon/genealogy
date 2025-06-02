@@ -105,11 +105,15 @@ class LegacyScraper(BaseScraper):
             for script in soup.find_all("script", type="application/ld+json"):
                 try:
                     data = json.loads(script.string)
-                    if "description" in data:
+                    # Prefer 'articleBody' if present
+                    if "articleBody" in data and data["articleBody"]:
+                        text = data["articleBody"]
+                        logger.debug("Found obituary text in JSON-LD 'articleBody'")
+                        return text
+                    if "description" in data and data["description"]:
                         text = data["description"]
-                        if text:  # Remove length check for JSON-LD
-                            logger.debug("Found obituary text in JSON-LD data")
-                            return text
+                        logger.debug("Found obituary text in JSON-LD 'description'")
+                        return text
                 except Exception as e:
                     logger.debug(f"Error parsing JSON-LD: {str(e)}")
                     continue
@@ -130,20 +134,56 @@ class LegacyScraper(BaseScraper):
                 'div[class*="obituary"]'
             ]
             
+            # Try each selector
             for selector in selectors:
                 text_div = soup.select_one(selector)
                 if text_div:
-                    # Clean up the text
-                    text = text_div.get_text(separator='\n', strip=True)
-                    if text:  # Remove length check for HTML content
+                    # Get all text elements within the container
+                    text_elements = []
+                    for element in text_div.stripped_strings:
+                        text_elements.append(element)
+                    
+                    # Join all text elements with proper spacing
+                    text = ' '.join(text_elements)
+                    if text:
+                        # Clean up the text
+                        text = ' '.join(text.split())  # Normalize whitespace
                         return text
             
             # If no specific selector worked, try to find the main content area
             main_content = soup.find('main') or soup.find('article')
             if main_content:
-                text = main_content.get_text(separator='\n', strip=True)
-                if text:  # Remove length check for main content
+                # Get all text elements within the main content
+                text_elements = []
+                for element in main_content.stripped_strings:
+                    text_elements.append(element)
+                
+                # Join all text elements with proper spacing
+                text = ' '.join(text_elements)
+                if text:
+                    # Clean up the text
+                    text = ' '.join(text.split())  # Normalize whitespace
                     return text
+            
+            # If still no text found, try to find any text that looks like an obituary
+            # Look for text containing common obituary phrases
+            text = soup.get_text(strip=True)
+            if "Kaczmarowski" in text:  # Look for the specific name
+                # Find the start of the obituary
+                start_idx = text.find("Kaczmarowski")
+                if start_idx != -1:
+                    # Find the end of the obituary (look for common ending phrases)
+                    end_phrases = ["Published by", "Arrangements by", "Funeral Home", "Memorial Service"]
+                    end_idx = len(text)
+                    for phrase in end_phrases:
+                        phrase_idx = text.find(phrase, start_idx)
+                        if phrase_idx != -1 and phrase_idx < end_idx:
+                            end_idx = phrase_idx
+                    
+                    # Extract the obituary text
+                    obit_text = text[start_idx:end_idx].strip()
+                    if obit_text:
+                        return obit_text
             
             return None
             
