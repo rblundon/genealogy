@@ -53,3 +53,4 @@ obituary_urls.json
 processed_obituaries.json
 obituary_people.json
 config.yaml.env
+.env
