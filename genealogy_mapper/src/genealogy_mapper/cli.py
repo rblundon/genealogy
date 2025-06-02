@@ -16,6 +16,10 @@ import os
 from datetime import datetime
 from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn, TimeRemainingColumn
 import importlib
+from openai import OpenAI
+from .core.relationship_processor import RelationshipProcessor
+from .core.visualizer import RelationshipVisualizer
+import yaml
 
 # Set up logging
 logging.basicConfig(
@@ -128,12 +132,20 @@ def cli(ctx, timeout, obituaries_file):
     logger.info("Starting Genealogy Mapper")
 
 @cli.command()
-@click.option('--import-url', help='Import a new obituary URL')
+@click.argument('url')
+@click.option('--input-file', '-i', type=click.Path(), help='Path to the obituary URLs JSON file')
 @click.pass_context
-def import_url(ctx, import_url):
+def import_url(ctx, url, input_file):
     """Import a new obituary URL."""
-    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=ctx.obj['json_path'])
-    if importer.import_url(import_url):
+    # Use input_file if provided, otherwise use the one from context
+    json_path = input_file or ctx.obj['json_path']
+    if not json_path:
+        logger.error("No input file specified. Use -i/--input-file or set --obituaries-file")
+        click.echo("Error: No input file specified. Use -i/--input-file or set --obituaries-file", err=True)
+        raise click.Abort()
+        
+    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=json_path)
+    if importer.import_url(url):
         logger.info("URL import completed successfully")
     else:
         logger.error("URL import failed")
@@ -237,7 +249,7 @@ def setup_logging(verbose: bool = False) -> None:
 @click.option(
     "--timeout",
     type=int,
-    default=3,
+    default=5,
     help="Timeout in seconds for web scraping operations",
 )
 @click.option(
@@ -406,7 +418,6 @@ def extract_obit_text(
                 # Process pending URLs with progress tracking
                 logger.info(f"Starting URL processing (force_rescrape={force_rescrape})")
                 importer.process_pending_urls(
-                    obituaries_file=obituaries_file,
                     force_rescrape=force_rescrape,
                     progress_callback=progress_callback
                 )
@@ -435,15 +446,41 @@ def init_database(db_directory: Optional[str] = None, config_path: Optional[str]
 @cli.command()
 @click.option('--config-path', type=click.Path(), help='Path to save config file (default: project_root/config.yaml)')
 def create_config(config_path: Optional[str] = None):
-    """Create a default configuration file."""
+    """Create a default configuration file with Neo4j and OpenAI settings."""
     try:
         # If no config path is provided, use the default location
         if config_path is None:
             config_path = str(Path(__file__).parent.parent.parent / 'config.yaml')
         
-        Config.create_default_config(config_path)
+        # Create default config with both Neo4j and OpenAI settings
+        default_config = {
+            'neo4j': {
+                'uri': 'bolt://localhost:7687',
+                'user': 'neo4j',
+                'password': 'your_password_here',
+                'max_connection_lifetime': 3600,
+                'max_connection_pool_size': 50,
+                'connection_timeout': 30
+            },
+            'openai': {
+                'api_key': 'your_openai_api_key_here',
+                'model': 'gpt-4-turbo-preview',
+                'temperature': 0.1,
+                'max_tokens': 2000
+            }
+        }
+        
+        # Create the config file
+        os.makedirs(os.path.dirname(config_path), exist_ok=True)
+        with open(config_path, 'w') as f:
+            yaml.dump(default_config, f, default_flow_style=False)
+            
         logger.info(f"Default configuration file created successfully at {config_path}")
         click.echo(f"Configuration file created at: {config_path}")
+        click.echo("\nPlease update the following values in the config file:")
+        click.echo("1. Neo4j password")
+        click.echo("2. OpenAI API key")
+        click.echo("3. Any other settings you want to customize")
     except Exception as e:
         logger.error(f"Failed to create configuration file: {e}")
         click.echo(f"Error: Failed to create configuration file: {e}", err=True)
@@ -610,6 +647,283 @@ def import_to_neo4j(input_file: str, config_path: Optional[str] = None, dry_run:
     except Exception as e:
         logger.error(f"Error importing to Neo4j: {e}")
         raise click.ClickException(str(e))
+
+@cli.command()
+@click.option('--input-file', '-i', required=True, help='Path to JSON file containing obituary URLs and text')
+@click.option('--output-file', '-o', help='Path to output JSON file (default: obituary_relationships.json)')
+@click.option('--force', is_flag=True, help='Force reprocessing of all obituaries regardless of status')
+@click.option('--dry-run', is_flag=True, help='Show what would be processed without making changes')
+def extract_relationships(input_file: str, output_file: Optional[str] = None, force: bool = False, dry_run: bool = False):
+    """Extract relationships from obituaries using OpenAI analysis."""
+    try:
+        # Load configuration
+        config = Config()
+        openai_config = config.get_openai_config()
+        
+        # Check for OpenAI API key
+        api_key = openai_config.get('api_key') or os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.error("OpenAI API key not found in configuration or environment")
+            click.echo("Error: OpenAI API key not found. Please set it in your config file or OPENAI_API_KEY environment variable.", err=True)
+            raise click.Abort()
+        
+        # Initialize OpenAI client
+        client = OpenAI(api_key=api_key)
+        
+        # Read input file
+        try:
+            with open(input_file, 'r') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            logger.error(f"Input file not found: {input_file}")
+            click.echo(f"Error: Input file not found: {input_file}", err=True)
+            raise click.Abort()
+        except json.JSONDecodeError:
+            logger.error(f"Invalid JSON in input file: {input_file}")
+            click.echo(f"Error: Invalid JSON in input file: {input_file}", err=True)
+            raise click.Abort()
+            
+        # Create backup of input file
+        backup_file = f"{input_file}.bak"
+        try:
+            with open(backup_file, 'w') as f:
+                json.dump(data, f, indent=2)
+            logger.info(f"Created backup of input file at: {backup_file}")
+        except Exception as e:
+            logger.warning(f"Failed to create backup file: {e}")
+            
+        # Process each obituary
+        results = []
+        for item in data.get('urls', []):
+            if not item.get('extracted_text'):
+                logger.warning(f"No text found for URL: {item.get('url')}")
+                continue
+                
+            # Skip if already processed and not forcing
+            if not force and item.get('relationships_extracted', {}).get('status') == 'completed':
+                logger.info(f"Skipping already processed URL: {item.get('url')}")
+                continue
+                
+            if dry_run:
+                logger.info(f"Would process URL: {item.get('url')}")
+                continue
+                
+            try:
+                # Prepare the prompt for OpenAI
+                prompt = f"""Use Named Entity Recognition (NER): Identify all individuals identified as having familial relationships in the sources and create a neo4j person node for each unique individual, using GEDCOM-compatible properties include neo4j relationship mappings.
+
+Obituary text:
+{item['extracted_text']}
+
+Please provide a detailed analysis of all people and their relationships."""
+
+                # Call OpenAI API
+                response = client.chat.completions.create(
+                    model=openai_config.get('model', 'gpt-4-turbo-preview'),
+                    messages=[
+                        {"role": "system", "content": "You are a genealogy expert specializing in extracting family relationships from obituaries."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=float(openai_config.get('temperature', 0.1)),
+                    max_tokens=int(openai_config.get('max_tokens', 2000))
+                )
+                
+                # Parse the response
+                analysis = response.choices[0].message.content
+                
+                # Create a copy of the item with the new analysis
+                processed_item = item.copy()
+                processed_item['relationships_extracted'] = {
+                    'status': 'completed',
+                    'last_attempt': datetime.now().isoformat(),
+                    'analysis': analysis
+                }
+                
+                results.append(processed_item)
+                logger.info(f"Successfully processed URL: {item.get('url')}")
+                
+            except Exception as e:
+                logger.error(f"Error processing URL {item.get('url')}: {str(e)}")
+                processed_item = item.copy()
+                processed_item['relationships_extracted'] = {
+                    'status': 'failed',
+                    'last_attempt': datetime.now().isoformat(),
+                    'error': str(e)
+                }
+                results.append(processed_item)
+        
+        # Write results to output file
+        output_file = output_file or 'obituary_relationships.json'
+        with open(output_file, 'w') as f:
+            json.dump({
+                'results': [{
+                    'url': item['url'],
+                    'analysis': item['relationships_extracted'].get('analysis'),
+                    'status': item['relationships_extracted'].get('status'),
+                    'last_attempt': item['relationships_extracted'].get('last_attempt')
+                } for item in results]
+            }, f, indent=2)
+            
+        logger.info(f"Processed {len(results)} obituaries")
+        click.echo(f"Successfully processed {len(results)} obituaries")
+        click.echo(f"Results written to: {output_file}")
+        click.echo(f"Input file backup created at: {backup_file}")
+        
+    except Exception as e:
+        logger.error(f"Error extracting relationships: {e}")
+        raise click.ClickException(str(e))
+
+@cli.command()
+@click.option('--input-file', '-i', required=True, help='Path to JSON file containing relationship analysis')
+@click.option('--dry-run', is_flag=True, help='Show what would be imported without making changes')
+def import_relationships(input_file: str, dry_run: bool = False):
+    """Import extracted relationships into Neo4j."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize processor
+        processor = RelationshipProcessor(neo4j_config)
+        
+        # Read input file
+        with open(input_file, 'r') as f:
+            data = json.load(f)
+        
+        if dry_run:
+            click.echo("\n[bold blue]Dry Run Mode[/bold blue]")
+            click.echo("Would import the following relationships:")
+            for item in data.get('results', []):
+                click.echo(f"\nURL: {item['url']}")
+                click.echo("Analysis preview:")
+                click.echo(item['analysis'][:200] + "...")
+            return
+        
+        # Process each analysis
+        success_count = 0
+        for item in data.get('results', []):
+            try:
+                # Process the analysis
+                processed_data = processor.process_analysis(item['analysis'])
+                if processed_data:
+                    # Import into Neo4j
+                    if processor.import_relationships(processed_data):
+                        success_count += 1
+                        click.echo(f"Successfully imported relationships from: {item['url']}")
+                    else:
+                        click.echo(f"Failed to import relationships from: {item['url']}", err=True)
+            except Exception as e:
+                click.echo(f"Error processing {item['url']}: {str(e)}", err=True)
+        
+        click.echo(f"\nSuccessfully imported {success_count} out of {len(data.get('results', []))} analyses")
+        
+    except Exception as e:
+        logger.error(f"Error importing relationships: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        processor.close()
+
+@cli.command()
+@click.option('--output-file', '-o', help='Path to save the visualization (default: output/relationship_graph.png)')
+@click.option('--format', type=click.Choice(['png', 'json']), default='png', help='Output format')
+def visualize_relationships(output_file: Optional[str] = None, format: str = 'png'):
+    """Visualize the current relationship graph."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize processor and visualizer
+        processor = RelationshipProcessor(neo4j_config)
+        visualizer = RelationshipVisualizer()
+        
+        # Get the current graph
+        graph_data = processor.get_relationship_graph()
+        if not graph_data:
+            click.echo("No relationship data found in the database", err=True)
+            return
+        
+        if format == 'png':
+            # Create visualization
+            output_path = visualizer.visualize_graph(graph_data, output_file)
+            if output_path:
+                click.echo(f"Visualization saved to: {output_path}")
+            else:
+                click.echo("Failed to create visualization", err=True)
+        else:
+            # Export JSON
+            output_path = visualizer.export_graph_json(graph_data, output_file)
+            if output_path:
+                click.echo(f"Graph data exported to: {output_path}")
+            else:
+                click.echo("Failed to export graph data", err=True)
+        
+    except Exception as e:
+        logger.error(f"Error visualizing relationships: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        processor.close()
+
+@cli.command()
+@click.option('--config-path', type=click.Path(), help='Path to config file (default: project_root/config.yaml)')
+def test_openai(config_path: str = None):
+    """Test OpenAI configuration and connectivity."""
+    try:
+        # Load configuration
+        config = Config(config_path)
+        openai_config = config.get_openai_config()
+        
+        # Check for OpenAI API key
+        api_key = openai_config.get('api_key') or os.getenv('OPENAI_API_KEY')
+        if not api_key:
+            logger.error("OpenAI API key not found in configuration or environment")
+            click.echo("Error: OpenAI API key not found. Please set it in your config file or OPENAI_API_KEY environment variable.", err=True)
+            raise click.Abort()
+        
+        # Initialize OpenAI client
+        client = OpenAI(api_key=api_key)
+        
+        # Display configuration
+        click.echo("\n[bold blue]OpenAI Configuration:[/bold blue]")
+        click.echo(f"Model: {openai_config.get('model')}")
+        click.echo(f"Temperature: {openai_config.get('temperature', 0.1)}")
+        click.echo(f"Max Tokens: {openai_config.get('max_tokens', 2000)}")
+        
+        # Test API connection with a simple request
+        click.echo("\n[bold blue]Testing API Connection...[/bold blue]")
+        response = client.chat.completions.create(
+            model=openai_config.get('model'),
+            messages=[
+                {"role": "system", "content": "You are a helpful assistant."},
+                {"role": "user", "content": "Please respond with 'Connection successful' if you can read this message."}
+            ],
+            temperature=float(openai_config.get('temperature', 0.1)),
+            max_tokens=int(openai_config.get('max_tokens', 2000))
+        )
+        
+        # Check response
+        if response.choices[0].message.content.strip() == "Connection successful":
+            click.echo("[green]\u2713 API Connection Test: Successful[/green]")
+            click.echo("[green]\u2713 Configuration is working correctly[/green]")
+        else:
+            click.echo("[yellow]\u26a0 API Connection Test: Response unexpected[/yellow]")
+            click.echo(f"Response: {response.choices[0].message.content}")
+            
+    except Exception as e:
+        logger.error(f"Error testing OpenAI configuration: {e}")
+        click.echo(f"[red]Error: {str(e)}[/red]", err=True)
+        raise click.ClickException(str(e))
+
+@cli.command()
+def debug_relationships():
+    """Debug command to check relationships in Neo4j."""
+    try:
+        processor = RelationshipProcessor()
+        processor.debug_check_relationships()
+        processor.close()
+    except Exception as e:
+        logger.error(f"Error in debug-relationships command: {str(e)}")
+        sys.exit(1)
 
 if __name__ == '__main__':
     cli() 
