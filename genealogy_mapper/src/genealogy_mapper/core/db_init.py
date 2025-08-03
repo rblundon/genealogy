@@ -115,7 +115,11 @@ class DatabaseInitializer:
             "CREATE CONSTRAINT media_id IF NOT EXISTS FOR (m:Media) REQUIRE m.id IS UNIQUE",
             
             # Submission constraints
-            "CREATE CONSTRAINT subn_id IF NOT EXISTS FOR (s:Submission) REQUIRE s.id IS UNIQUE"
+            "CREATE CONSTRAINT subn_id IF NOT EXISTS FOR (s:Submission) REQUIRE s.id IS UNIQUE",
+            
+            # Obituary constraints
+            "CREATE CONSTRAINT obit_url IF NOT EXISTS FOR (o:Obituary) REQUIRE o.url IS UNIQUE",
+            "CREATE CONSTRAINT obit_id IF NOT EXISTS FOR (o:Obituary) REQUIRE o.id IS UNIQUE"
         ]
         
         for constraint in constraints:
@@ -134,7 +138,12 @@ class DatabaseInitializer:
             
             # Source indexes
             "CREATE INDEX sour_author IF NOT EXISTS FOR (s:Source) ON (s.author)",
-            "CREATE INDEX sour_publication IF NOT EXISTS FOR (s:Source) ON (s.publication)"
+            "CREATE INDEX sour_publication IF NOT EXISTS FOR (s:Source) ON (s.publication)",
+            
+            # Obituary indexes
+            "CREATE INDEX obit_status IF NOT EXISTS FOR (o:Obituary) ON (o.status)",
+            "CREATE INDEX obit_source IF NOT EXISTS FOR (o:Obituary) ON (o.source)",
+            "CREATE INDEX obit_created_at IF NOT EXISTS FOR (o:Obituary) ON (o.created_at)"
         ]
         
         for index in indexes:

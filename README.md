@@ -28,7 +28,7 @@ A tool for extracting and managing genealogical information from obituaries.
 
    # Activate virtual environment
    # On macOS/Linux:
-   source .venv/bin/activate
+   source .geneaology-env/bin/activate
    # On Windows:
    .venv\Scripts\activate
 
@@ -38,11 +38,11 @@ A tool for extracting and managing genealogical information from obituaries.
 
 3. Install dependencies:
    ```bash
-   # Install all dependencies (including development tools)
-   pip install -r requirements-dev.txt
-
-   # Install the package in editable mode
+   # Install core dependencies and the package in editable mode
    pip install -e .
+
+   # Install development dependencies (optional)
+   pip install -e ".[dev]"
 
    # Install Playwright browsers (required for web scraping)
    playwright install
@@ -50,9 +50,9 @@ A tool for extracting and managing genealogical information from obituaries.
 
    This step:
    - Installs all core dependencies (web scraping, NLP, database, etc.)
-   - Installs development tools (testing, linting, formatting)
    - Installs the package in editable mode for development
    - Installs Playwright browsers (Chromium, Firefox, and WebKit) for web scraping
+   - Optionally installs development tools (testing, linting, formatting)
 
    Core dependencies include:
    - `selenium` and `webdriver-manager` for web scraping
@@ -63,7 +63,7 @@ A tool for extracting and managing genealogical information from obituaries.
    - `click` for CLI interface
    - `rich` for terminal formatting
 
-   Development tools include:
+   Development tools (optional) include:
    - `pytest` for testing
    - `black` for code formatting
    - `flake8` for linting
@@ -141,138 +141,214 @@ If you need to start fresh:
    ```
 
 ### Database Schema
-The database uses a GEDCOM-compatible schema with:
-- Person nodes with properties (name, birth date, death date, etc.)
-- Relationship types (FAMILY, PARENT, CHILD, etc.)
-- Constraints on unique identifiers
-- Indexes for common query patterns
+The database uses a GEDCOM-compatible schema with the following structure:
+
+1. **Node Types**
+
+   a. **Individual**
+      - Properties:
+        - `id`: Unique identifier
+        - `name`: Full name
+        - `birth_date`: Date of birth
+        - `death_date`: Date of death
+        - `gender`: M/F/U
+        - `birth_place`: Place of birth
+        - `death_place`: Place of death
+        - `occupation`: Occupation
+        - `education`: Education details
+        - `military_service`: Military service details
+        - `data_quality`: Metadata about data quality
+
+   b. **Family**
+      - Properties:
+        - `id`: Unique identifier
+        - `marriage_date`: Date of marriage
+        - `marriage_place`: Place of marriage
+        - `divorce_date`: Date of divorce (if applicable)
+
+   c. **Source**
+      - Properties:
+        - `id`: Unique identifier
+        - `author`: Author of the source
+        - `publication`: Publication details
+        - `title`: Source title
+        - `date`: Source date
+
+   d. **Repository**
+      - Properties:
+        - `id`: Unique identifier
+        - `name`: Repository name
+        - `address`: Repository address
+
+   e. **Note**
+      - Properties:
+        - `id`: Unique identifier
+        - `text`: Note content
+        - `date`: Note date
+
+   f. **Media**
+      - Properties:
+        - `id`: Unique identifier
+        - `file`: File reference
+        - `format`: Media format
+        - `title`: Media title
+
+   g. **Submission**
+      - Properties:
+        - `id`: Unique identifier
+        - `submitter`: Submitter details
+        - `date`: Submission date
+
+   h. **Obituary**
+      - Properties:
+        - `id`: Unique identifier (UUID)
+        - `url`: Unique obituary URL
+        - `status`: Processing status (PENDING, PROCESSING, COMPLETED, FAILED)
+        - `source`: Source website
+        - `created_at`: Creation timestamp
+        - `updated_at`: Last update timestamp
+        - `error_message`: Error message (if failed)
+
+2. **Relationships**
+
+   a. **Family Relationships**
+      - `(Individual)-[:PARENT_OF]->(Individual)`
+      - `(Individual)-[:CHILD_OF]->(Individual)`
+      - `(Individual)-[:SPOUSE_OF]->(Individual)`
+      - `(Individual)-[:SIBLING_OF]->(Individual)`
+
+   b. **Source Relationships**
+      - `(Source)-[:CITES]->(Individual)`
+      - `(Source)-[:CITES]->(Family)`
+      - `(Repository)-[:HOLDS]->(Source)`
+
+   c. **Media Relationships**
+      - `(Media)-[:REFERENCES]->(Individual)`
+      - `(Media)-[:REFERENCES]->(Family)`
+
+   d. **Note Relationships**
+      - `(Note)-[:ATTACHED_TO]->(Individual)`
+      - `(Note)-[:ATTACHED_TO]->(Family)`
+
+   e. **Obituary Relationships**
+      - `(Obituary)-[:MENTIONS]->(Individual)`
+      - `(Obituary)-[:PROCESSED_BY]->(Individual)`
+
+3. **Constraints**
+   - Unique constraints on all `id` properties
+   - Unique constraint on Individual `name`
+   - Unique constraint on Obituary `url`
+
+4. **Indexes**
+   - Individual: `name`, `birth_date`, `death_date`
+   - Family: `marriage_date`
+   - Source: `author`, `publication`
+   - Obituary: `status`, `source`, `created_at`
+
+This schema provides:
+- Complete GEDCOM compatibility
+- Efficient querying through indexes
+- Data integrity through constraints
+- Flexible relationship modeling
+- Comprehensive metadata tracking
 
 ## Program Flow
 
-Before starting, ensure you have:
-1. Created and activated the virtual environment (`.venv`)
-2. Installed all dependencies:
+1. **Configuration Setup**
+   - Create configuration file with Neo4j and OpenAI settings
+   - Initialize Neo4j database with GEDCOM schema
+   - Set up required dependencies
+
+2. **Add Obituary URLs**
+   - Use `add-obituary` command to add new obituary URLs
+   - Automatically detects source from URL
+   - Validates URL accessibility
+   - Extracts metadata (newspaper, location, publication date)
+   - Supports dry-run mode and force rescrape
    ```bash
-   pip install -r requirements-dev.txt
-   pip install -e .
-   ```
-3. Set up your environment variables (`.env` file)
-
-Then proceed with:
-
-1. **Initial Setup** (Only needed once)
-   ```bash
-   # Create configuration file (if not already created)
-   python -m genealogy_mapper.cli create-config
-
-   # Initialize Neo4j database (only needed once for first-time setup)
-   python -m genealogy_mapper.cli init-database
-   ```
-
-2. **Import Obituary URLs**
-   ```bash
-   # Import a single URL
-   python -m genealogy_mapper.cli import-url --import-url "https://example.com/obituary"
-
-   # Import with custom timeout
-   python -m genealogy_mapper.cli import-url --import-url "https://example.com/obituary" --timeout 10
+   # Add a new obituary
+   python -m genealogy_mapper.cli add-obituary "https://www.legacy.com/us/obituaries/example"
+   
+   # Dry run mode
+   python -m genealogy_mapper.cli add-obituary "https://www.legacy.com/us/obituaries/example" --dry-run
+   
+   # Force rescrape existing URL
+   python -m genealogy_mapper.cli add-obituary "https://www.legacy.com/us/obituaries/example" --force
    ```
 
-3. **Extract Text from URLs**
-   ```bash
-   # Basic extraction
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json
+python -m genealogy_mapper.cli list-obituaries
 
-   # With verbose logging
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json -v
+3. **Process Obituaries**
+   - Extract text content from pending obituaries
+   - Process text to identify individuals and relationships
+   - Store extracted information in Neo4j
 
-   # Dry run to preview changes
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json --dry-run
+4. **Import to Neo4j**
+   - Import processed data into Neo4j database
+   - Create nodes for individuals and relationships
+   - Handle conflicts and duplicates
 
-   # Force rescrape of all URLs
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json --force-rescrape
-
-   # All options together
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json --timeout 5 --force-rescrape --dry-run -v
-   ```
-
-4. **Process Obituaries**
-   ```bash
-   # Using hybrid processor (OpenAI + NER)
-   python -m genealogy_mapper.cli add-obit-people -i obituary_urls.json -o processed_obituaries.json
-
-   # Using NER only
-   python -m genealogy_mapper.cli add-obit-people -i obituary_urls.json -o processed_obituaries.json --use-ner
-   ```
-
-5. **Import to Neo4j**
-   ```bash
-   # Basic import
-   python -m genealogy_mapper.cli import-to-neo4j -i processed_obituaries.json
-
-   # Preview changes without importing
-   python -m genealogy_mapper.cli import-to-neo4j -i processed_obituaries.json --dry-run
-
-   # Interactive conflict resolution
-   python -m genealogy_mapper.cli import-to-neo4j -i processed_obituaries.json --interactive
-
-   # Force import (skip validation)
-   python -m genealogy_mapper.cli import-to-neo4j -i processed_obituaries.json --force
-   ```
+5. **Visualize Relationships**
+   - Generate visual representation of family relationships
+   - Export graph data in various formats
 
 ## Command Options
 
-### extract-obit-text
+### Obituary Management
 
-Extract text from pending obituary URLs with the following options:
-
-- `-i, --input-file, --obituaries-file`: Path to the obituary URLs JSON file (default: obituary_urls.json)
-- `--timeout`: Timeout in seconds for web scraping operations (default: 3)
-- `--force-rescrape`: Force rescrape of all URLs regardless of status
-- `--dry-run`: Show what would be processed without making changes
-- `-v, --verbose`: Enable verbose logging
-
-Example output with verbose logging:
+#### Add a New Obituary
+```bash
+python -m genealogy_mapper.cli add-obituary "https://www.legacy.com/us/obituaries/example"
 ```
-[INFO] Loading JSON file: obituary_urls.json
-[INFO] Validating JSON structure
-[INFO] Loading configuration
-[INFO] Initializing URL importer with timeout=5
-[INFO] Starting URL processing (force_rescrape=False)
-⠋ Processing 5 URLs... [████████████████████] 100% 0:00:00
-Processed: https://example.com/obit1 (completed)
-Processed: https://example.com/obit2 (failed)
-...
-[INFO] Text extraction completed successfully
+Options:
+- `--dry-run`: Show what would be done without making changes
+- `--force`: Force rescrape even if URL exists
+
+Features:
+- Automatic source detection from URL
+- URL validation and accessibility check
+- Metadata extraction (newspaper, location, publication date)
+- Progress tracking and error handling
+- Rich console output with detailed information
+
+#### List Obituaries
+```bash
+python -m genealogy_mapper.cli list-obituaries [--status STATUS] [--source SOURCE]
 ```
+Options:
+- `--status`: Filter by status (PENDING, PROCESSING, COMPLETED, FAILED)
+- `--source`: Filter by source website
 
-### Configuration Options
+#### Update Obituary Status
+```bash
+python -m genealogy_mapper.cli update-obituary URL --status STATUS [--error ERROR]
+```
+Options:
+- `--status`: New status (PENDING, PROCESSING, COMPLETED, FAILED)
+- `--error`: Error message (required if status is FAILED)
 
-#### Timeouts
+#### Process Obituaries
+```bash
+python -m genealogy_mapper.cli process-obituaries [--force]
+```
+Options:
+- `--force`: Process all URLs, even if they have "completed" status
 
-- Default timeout: 3 seconds
-- Can be overridden per command using `--timeout`
-- Affects web scraping operations (URL import and text extraction)
-- Recommended values:
-  - Fast sites: 3-5 seconds
-  - Medium sites: 5-10 seconds
-  - Slow sites: 10-30 seconds
+### Deprecated Commands
 
-#### Conflict Resolution
+> **Note**: The following commands are deprecated and will be removed in a future version. Please use the new obituary management commands instead.
 
-When importing data that conflicts with existing records, you can choose how to handle each conflict:
-
-1. **Keep Existing**: Preserve the current value in the database
-2. **Use New**: Replace with the new value from the import
-3. **Merge**: For dates, keep the more specific one; for other fields, keep existing
-4. **Skip**: Don't update this field
-
-Conflicts are detected for:
-- Birth dates
-- Death dates
-- Gender
-- Birth place
-- Death place
+#### Import URL (Deprecated)
+```bash
+python -m genealogy_mapper.cli import-url URL
+```
+This command is deprecated. Please use `add-obituary` instead, which provides enhanced functionality including:
+- Automatic source detection
+- URL validation
+- Metadata extraction
+- Progress tracking
+- Dry run mode
+- Force rescrape option
 
 ## Development
 
@@ -319,4 +395,138 @@ pytest
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details. 
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Obituary Management
+
+The system now includes a dedicated obituary management system that stores obituary URLs and their processing status directly in Neo4j. This provides better data consistency, tracking, and querying capabilities.
+
+### Obituary Commands
+
+1. **Add a New Obituary**
+   ```bash
+   # Add a new obituary URL (source is automatically detected)
+   python -m genealogy_mapper.cli add-obituary "https://www.legacy.com/us/obituaries/example"
+   ```
+
+2. **List Obituaries**
+   ```bash
+   # List all obituaries
+   python -m genealogy_mapper.cli list-obituaries
+
+   # Filter by status
+   python -m genealogy_mapper.cli list-obituaries --status PENDING
+
+   # Filter by source
+   python -m genealogy_mapper.cli list-obituaries --source "legacy.com"
+   ```
+
+3. **Update Obituary Status**
+   ```bash
+   # Update status to COMPLETED
+   python -m genealogy_mapper.cli update-obituary "https://example.com/obit" --status COMPLETED
+
+   # Update status to FAILED with error message
+   python -m genealogy_mapper.cli update-obituary "https://example.com/obit" --status FAILED --error "Failed to extract text"
+   ```
+
+### Obituary Schema
+
+The obituary management system uses the following Neo4j schema:
+
+1. **Node Type**: `Obituary`
+   - Properties:
+     - `id`: Unique identifier (UUID)
+     - `url`: Unique obituary URL
+     - `status`: Processing status (PENDING, PROCESSING, COMPLETED, FAILED)
+     - `source`: Source website (e.g., "legacy.com")
+     - `created_at`: Timestamp of creation
+     - `updated_at`: Timestamp of last update
+     - `error_message`: Optional error message for failed processing
+
+2. **Relationships**:
+   - `(Obituary)-[:MENTIONS]->(Individual)`: Links obituary to individuals mentioned in it
+   - `(Obituary)-[:PROCESSED_BY]->(Individual)`: Links obituary to the person it's about
+
+3. **Constraints and Indexes**:
+   - Unique constraint on `url`
+   - Unique constraint on `id`
+   - Index on `status` for quick filtering
+   - Index on `source` for source-based queries
+   - Index on `created_at` for chronological queries
+
+### Benefits of Neo4j Storage
+
+1. **Data Consistency**
+   - Centralized storage of obituary information
+   - Automatic tracking of processing status
+   - Built-in constraints to prevent duplicates
+
+2. **Querying Capabilities**
+   - Find all obituaries mentioning a specific person
+   - Track processing status across the system
+   - Analyze patterns in obituary sources
+
+3. **Integration**
+   - Direct linking to individual nodes
+   - Support for relationship tracking
+   - Metadata management
+
+4. **Monitoring**
+   - Track processing status in real-time
+   - Monitor error rates and patterns
+   - Analyze processing times
+
+### Example Queries
+
+1. **Find Pending Obituaries**
+   ```cypher
+   MATCH (o:Obituary)
+   WHERE o.status = 'PENDING'
+   RETURN o
+   ORDER BY o.created_at
+   ```
+
+2. **Find Obituaries by Source**
+   ```cypher
+   MATCH (o:Obituary)
+   WHERE o.source = 'legacy.com'
+   RETURN o
+   ORDER BY o.created_at
+   ```
+
+3. **Find Obituaries Mentioning a Person**
+   ```cypher
+   MATCH (o:Obituary)-[:MENTIONS]->(i:Individual {name: 'John Smith'})
+   RETURN o
+   ORDER BY o.created_at
+   ```
+
+4. **Get Processing Statistics**
+   ```cypher
+   MATCH (o:Obituary)
+   RETURN o.status, count(*) as count
+   ORDER BY count DESC
+   ```
+
+### Migration from JSON Storage
+
+If you were previously using the JSON-based storage system, you can migrate your data using the following steps:
+
+1. **Export Existing URLs**
+   ```bash
+   # Export URLs from JSON file
+   python -m genealogy_mapper.cli export-urls -i obituary_urls.json -o urls.txt
+   ```
+
+2. **Import to Neo4j**
+   ```bash
+   # Import URLs to Neo4j
+   cat urls.txt | xargs -I {} python -m genealogy_mapper.cli add-obituary {}
+   ```
+
+3. **Verify Migration**
+   ```bash
+   # Check imported obituaries
+   python -m genealogy_mapper.cli list-obituaries
+   ``` 

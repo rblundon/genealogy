@@ -20,6 +20,9 @@ from openai import OpenAI
 from .core.relationship_processor import RelationshipProcessor
 from .core.visualizer import RelationshipVisualizer
 import yaml
+from urllib.parse import urlparse
+from .core.obituary_manager import ObituaryManager
+from .core.obituary_processor import ObituaryProcessor
 
 # Set up logging
 logging.basicConfig(
@@ -130,25 +133,6 @@ def cli(ctx, timeout, obituaries_file):
     ctx.obj['timeout'] = timeout
     ctx.obj['json_path'] = obituaries_file
     logger.info("Starting Genealogy Mapper")
-
-@cli.command()
-@click.argument('url')
-@click.option('--input-file', '-i', type=click.Path(), help='Path to the obituary URLs JSON file')
-@click.pass_context
-def import_url(ctx, url, input_file):
-    """Import a new obituary URL."""
-    # Use input_file if provided, otherwise use the one from context
-    json_path = input_file or ctx.obj['json_path']
-    if not json_path:
-        logger.error("No input file specified. Use -i/--input-file or set --obituaries-file")
-        click.echo("Error: No input file specified. Use -i/--input-file or set --obituaries-file", err=True)
-        raise click.Abort()
-        
-    importer = URLImporter(timeout=ctx.obj['timeout'], json_path=json_path)
-    if importer.import_url(url):
-        logger.info("URL import completed successfully")
-    else:
-        logger.error("URL import failed")
 
 def validate_obituary_json(data: Dict[str, Any]) -> List[str]:
     """Validate the structure of the obituary URLs JSON file."""
@@ -925,5 +909,422 @@ def debug_relationships():
         logger.error(f"Error in debug-relationships command: {str(e)}")
         sys.exit(1)
 
+@cli.command()
+@click.argument('url')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
+@click.option('--force', is_flag=True, help='Force rescrape even if URL exists')
+def add_obituary(url: str, dry_run: bool, force: bool):
+    """Add a new obituary URL to the database and process it."""
+    try:
+        # Extract domain for source
+        domain = urlparse(url).netloc.lower()
+        source = "legacy.com" if "legacy.com" in domain else domain
+        
+        with ObituaryManager() as manager:
+            obituary_id = manager.add_obituary_url(url, source, dry_run=dry_run, force_rescrape=force)
+            if obituary_id:
+                if not dry_run:
+                    click.echo(f"Successfully added obituary URL: {url}")
+                    click.echo(f"Source detected: {source}")
+                    # Automatically process the obituary
+                    with ObituaryProcessor() as processor:
+                        text = processor.extract_and_store_text(obituary_id)
+                        if text:
+                            click.echo(f"Successfully extracted and stored text for obituary {obituary_id}")
+                            person_id = processor.process_obituary(obituary_id)
+                            if person_id:
+                                click.echo(f"Successfully processed obituary and created person {person_id}")
+                            else:
+                                click.echo(f"Failed to process obituary after addition (ID: {obituary_id})")
+                        else:
+                            click.echo(f"Failed to extract and store text for obituary {obituary_id}")
+                else:
+                    click.echo(f"[Dry Run] Would add obituary URL: {url}")
+            else:
+                click.echo(f"Failed to add obituary URL: {url}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.option('--force', is_flag=True, help='Process all URLs, even if they have "completed" status')
+def process_obituaries(force: bool):
+    """Process all pending obituaries."""
+    try:
+        with ObituaryManager() as manager:
+            processed = manager.process_pending_urls(force_rescrape=force)
+            if processed:
+                click.echo(f"Successfully processed {len(processed)} obituaries")
+            else:
+                click.echo("No obituaries to process")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.option('--status', '-s', type=click.Choice(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']), help='Filter by status')
+@click.option('--source', '-s', help='Filter by source website')
+def list_obituaries(status: Optional[str] = None, source: Optional[str] = None):
+    """List obituaries in the database."""
+    try:
+        manager = ObituaryManager()
+        
+        query = "MATCH (o:Obituary)"
+        params = {}
+        
+        if status or source:
+            query += " WHERE"
+            conditions = []
+            if status:
+                conditions.append("o.status = $status")
+                params['status'] = status
+            if source:
+                conditions.append("o.source = $source")
+                params['source'] = source
+            query += " " + " AND ".join(conditions)
+        
+        query += " RETURN o ORDER BY o.created_at"
+        
+        with manager.driver.session() as session:
+            result = session.run(query, **params)
+            obituaries = [dict(record['o']) for record in result]
+            
+            if not obituaries:
+                click.echo("No obituaries found.")
+                return
+            
+            # Print in a table format
+            click.echo("\nObituaries:")
+            click.echo("-" * 100)
+            click.echo(f"{'URL':<50} {'Status':<10} {'Source':<15} {'Created':<20}")
+            click.echo("-" * 100)
+            
+            for obit in obituaries:
+                created = obit['created_at'].strftime('%Y-%m-%d %H:%M:%S')
+                click.echo(f"{obit['url']:<50} {obit['status']:<10} {obit['source']:<15} {created:<20}")
+            
+            click.echo("-" * 100)
+            click.echo(f"Total: {len(obituaries)} obituaries")
+            
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+    finally:
+        manager.close()
+
+@cli.command()
+@click.argument('url')
+@click.option('--status', '-s', required=True, type=click.Choice(['PENDING', 'PROCESSING', 'COMPLETED', 'FAILED']), help='New status')
+@click.option('--error', '-e', help='Error message (required if status is FAILED)')
+def update_obituary(url: str, status: str, error: Optional[str] = None):
+    """Update the status of an obituary."""
+    if status == 'FAILED' and not error:
+        click.echo("Error: Error message is required when status is FAILED")
+        return
+    
+    try:
+        manager = ObituaryManager()
+        if manager.update_obituary_status(url, status, error):
+            click.echo(f"Successfully updated obituary status: {url} -> {status}")
+        else:
+            click.echo(f"Failed to update obituary status: {url}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+    finally:
+        manager.close()
+
+@cli.command()
+@click.argument('url')
+@click.option('--id', help='Process existing obituary by ID instead of URL')
+def process_obituary(url: str, id: Optional[str] = None):
+    """Process an obituary to extract text and create person record."""
+    try:
+        with ObituaryProcessor() as processor:
+            if id:
+                # Process existing obituary by ID
+                person_id = processor.process_obituary(id)
+                if person_id:
+                    click.echo(f"Successfully processed obituary {id} and created person {person_id}")
+                else:
+                    click.echo(f"Failed to process obituary {id}")
+            else:
+                # Add new obituary and process it
+                with ObituaryManager() as manager:
+                    obituary_id = manager.add_obituary_url(url, detect_source(url))
+                    if not obituary_id:
+                        click.echo("Failed to add obituary URL")
+                        return
+                    
+                    # Process the newly added obituary
+                    person_id = processor.process_obituary(obituary_id)
+                    if person_id:
+                        click.echo(f"Successfully processed obituary {obituary_id} and created person {person_id}")
+                    else:
+                        click.echo(f"Failed to process obituary {obituary_id}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+        raise click.Abort()
+
+@cli.command()
+@click.option('--status', type=click.Choice(['COMPLETED', 'PROCESSED', 'ALL']), default='COMPLETED', help='Filter obituaries by status')
+@click.option('--force', is_flag=True, help='Force reprocessing of all obituaries regardless of status')
+@click.option('--dry-run', is_flag=True, help='Show what would be processed without making changes')
+@click.option('--skip-extraction', is_flag=True, help='Skip OpenAI extraction and use existing analysis')
+@click.option('--analysis-file', '-a', help='Use existing analysis file instead of extracting from database')
+def process_relationships_from_db(status: str, force: bool = False, dry_run: bool = False, skip_extraction: bool = False, analysis_file: Optional[str] = None):
+    """Complete workflow: Extract and import relationships from obituaries in the database."""
+    try:
+        # Load configuration
+        config = Config()
+        openai_config = config.get_openai_config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Check for OpenAI API key (unless skipping extraction)
+        if not skip_extraction and not analysis_file:
+            api_key = openai_config.get('api_key') or os.getenv('OPENAI_API_KEY')
+            if not api_key:
+                logger.error("OpenAI API key not found in configuration or environment")
+                click.echo("Error: OpenAI API key not found. Please set it in your config file or OPENAI_API_KEY environment variable.", err=True)
+                raise click.Abort()
+        
+        # Initialize processors
+        obituary_manager = ObituaryManager(neo4j_config)
+        relationship_processor = RelationshipProcessor(neo4j_config)
+        
+        if analysis_file:
+            # Use existing analysis file
+            click.echo(f"Using existing analysis file: {analysis_file}")
+            with open(analysis_file, 'r') as f:
+                data = json.load(f)
+            results = data.get('results', [])
+        else:
+            # Get obituaries from database
+            status_filter = None if status == 'ALL' else status
+            obituaries = obituary_manager.get_obituaries_with_text(status_filter)
+            
+            if not obituaries:
+                click.echo("No obituaries with extracted text found in the database.")
+                return
+            
+            click.echo(f"Found {len(obituaries)} obituaries with extracted text")
+            
+            if skip_extraction:
+                click.echo("Skipping extraction step - no analysis data available")
+                return
+            
+            # Extract relationships using OpenAI
+            client = OpenAI(api_key=api_key)
+            results = []
+            
+            for obituary in obituaries:
+                if not obituary.get('extracted_text'):
+                    logger.warning(f"No text found for obituary: {obituary.get('url')}")
+                    continue
+                
+                if dry_run:
+                    logger.info(f"Would process obituary: {obituary.get('url')}")
+                    continue
+                
+                try:
+                    # Prepare the prompt for OpenAI
+                    prompt = f"""Use Named Entity Recognition (NER): Identify all individuals identified as having familial relationships in the sources and create a neo4j person node for each unique individual, using GEDCOM-compatible properties include neo4j relationship mappings.
+
+Obituary text:
+{obituary['extracted_text']}
+
+Please provide a detailed analysis of all people and their relationships."""
+
+                    # Call OpenAI API
+                    response = client.chat.completions.create(
+                        model=openai_config.get('model', 'gpt-4-turbo-preview'),
+                        messages=[
+                            {"role": "system", "content": "You are a genealogy expert specializing in extracting family relationships from obituaries."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=float(openai_config.get('temperature', 0.1)),
+                        max_tokens=int(openai_config.get('max_tokens', 2000))
+                    )
+                    
+                    # Parse the response
+                    analysis = response.choices[0].message.content
+                    
+                    # Create result entry
+                    processed_item = {
+                        'url': obituary.get('url'),
+                        'id': obituary.get('id'),
+                        'analysis': analysis
+                    }
+                    
+                    results.append(processed_item)
+                    logger.info(f"Successfully extracted relationships from: {obituary.get('url')}")
+                    
+                except Exception as e:
+                    logger.error(f"Error processing obituary {obituary.get('url')}: {str(e)}")
+        
+        # Import relationships into Neo4j
+        if dry_run:
+            click.echo("\n[bold blue]Dry Run Mode[/bold blue]")
+            click.echo("Would import the following relationships:")
+            for item in results:
+                click.echo(f"\nURL: {item['url']}")
+                click.echo("Analysis preview:")
+                click.echo(item['analysis'][:200] + "...")
+            return
+        
+        # Process each analysis
+        success_count = 0
+        for item in results:
+            try:
+                # Process the analysis
+                processed_data = relationship_processor.process_analysis(item['analysis'])
+                if processed_data:
+                    # Import into Neo4j
+                    if relationship_processor.import_relationships(processed_data):
+                        success_count += 1
+                        click.echo(f"Successfully imported relationships from: {item['url']}")
+                    else:
+                        click.echo(f"Failed to import relationships from: {item['url']}", err=True)
+            except Exception as e:
+                click.echo(f"Error processing {item['url']}: {str(e)}", err=True)
+        
+        click.echo(f"\nSuccessfully imported {success_count} out of {len(results)} analyses")
+        
+    except Exception as e:
+        logger.error(f"Error processing relationships from database: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
+        relationship_processor.close()
+
+@cli.command()
+@click.option('--dry-run', is_flag=True, help='Show what would be changed without making changes')
+def normalize_traditional_names(dry_run: bool = False):
+    """Apply traditional naming conventions to existing relationships in the database.
+    
+    This command:
+    1. Finds all SPOUSE_OF relationships
+    2. Identifies wives and changes their last names to their husbands' last names
+    3. Preserves original last names as maiden_name
+    4. Updates the database accordingly
+    """
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize processor
+        processor = RelationshipProcessor(neo4j_config)
+        
+        if dry_run:
+            click.echo("\n[bold blue]Dry Run Mode[/bold blue]")
+            click.echo("Would apply traditional naming conventions to the following relationships:")
+        
+        # Get all individuals with spouse relationships
+        with processor.driver.session() as session:
+            query = """
+            MATCH (p1:Individual)-[r:SPOUSE_OF]->(p2:Individual)
+            RETURN p1.id as person1_id, p1.name as person1_name, 
+                   p2.id as person2_id, p2.name as person2_name
+            """
+            result = session.run(query)
+            spouse_relationships = []
+            
+            for record in result:
+                spouse_relationships.append({
+                    'person1_id': record['person1_id'],
+                    'person1_name': record['person1_name'],
+                    'person2_id': record['person2_id'],
+                    'person2_name': record['person2_name']
+                })
+            
+            if not spouse_relationships:
+                click.echo("No spouse relationships found in the database.")
+                return
+            
+            click.echo(f"Found {len(spouse_relationships)} spouse relationships")
+            
+            # Process each spouse relationship
+            for rel in spouse_relationships:
+                person1_name_parts = rel['person1_name'].split()
+                person2_name_parts = rel['person2_name'].split()
+                
+                # More conservative heuristic: only change if last names are clearly different
+                # and one person has a middle name while the other doesn't
+                person1_last = person1_name_parts[-1] if person1_name_parts else ''
+                person2_last = person2_name_parts[-1] if person2_name_parts else ''
+                
+                # Skip if they already have the same last name
+                if person1_last == person2_last:
+                    continue
+                
+                # For traditional naming, we need to determine which is the wife
+                # We'll use a conservative approach based on name structure
+                # In traditional naming, the wife takes the husband's last name
+                
+                # Heuristic: wife typically has fewer name parts (First Last vs First Middle Last)
+                # This is a conservative approach - only change if clear pattern exists
+                if len(person1_name_parts) == 2 and len(person2_name_parts) > 2:
+                    # Person1 has simple name (First Last), Person2 has middle name
+                    # Assume Person1 is wife taking husband's name
+                    wife_id = rel['person1_id']
+                    wife_name = rel['person1_name']
+                    husband_name = rel['person2_name']
+                    wife_name_parts = person1_name_parts
+                    husband_name_parts = person2_name_parts
+                elif len(person2_name_parts) == 2 and len(person1_name_parts) > 2:
+                    # Person2 has simple name (First Last), Person1 has middle name
+                    # Assume Person2 is wife taking husband's name
+                    wife_id = rel['person2_id']
+                    wife_name = rel['person2_name']
+                    husband_name = rel['person1_name']
+                    wife_name_parts = person2_name_parts
+                    husband_name_parts = person1_name_parts
+                else:
+                    # Both have similar name structures, skip to avoid incorrect changes
+                    continue
+                
+                # Only proceed if the wife's current last name is different from husband's
+                wife_last = wife_name_parts[-1]
+                husband_last = husband_name_parts[-1]
+                
+                if wife_last != husband_last:
+                    maiden_name = wife_last
+                    
+                    # Create new name with husband's last name
+                    if len(wife_name_parts) == 2:
+                        new_name = f"{wife_name_parts[0]} {husband_last}"
+                    else:
+                        new_name = f"{' '.join(wife_name_parts[:-1])} {husband_last}"
+                    
+                    if dry_run:
+                        click.echo(f"\nWould update {wife_id}:")
+                        click.echo(f"  '{wife_name}' -> '{new_name}'")
+                        click.echo(f"  maiden_name: {maiden_name}")
+                    else:
+                        # Update the person node
+                        update_query = """
+                        MATCH (p:Individual {id: $id})
+                        SET p.name = $new_name, p.maiden_name = $maiden_name
+                        RETURN p
+                        """
+                        result = session.run(update_query, 
+                            id=wife_id,
+                            new_name=new_name,
+                            maiden_name=maiden_name
+                        )
+                        
+                        if result.single():
+                            click.echo(f"Updated {wife_id}: '{wife_name}' -> '{new_name}' (maiden: {maiden_name})")
+                        else:
+                            click.echo(f"Failed to update {wife_id}", err=True)
+        
+        if dry_run:
+            click.echo("\nNo changes made (dry run mode)")
+        else:
+            click.echo(f"\nSuccessfully processed {len(spouse_relationships)} spouse relationships")
+        
+    except Exception as e:
+        logger.error(f"Error normalizing traditional names: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        processor.close()
+
 if __name__ == '__main__':
-    cli() 
+    cli()

@@ -22,7 +22,11 @@ cd genealogy-mapper
 
 2. Install dependencies:
 ```bash
-pip install -r requirements.txt
+# Install core dependencies and the package in editable mode
+pip install -e .
+
+# Install development dependencies (optional)
+pip install -e ".[dev]"
 ```
 
 3. Set up environment variables:

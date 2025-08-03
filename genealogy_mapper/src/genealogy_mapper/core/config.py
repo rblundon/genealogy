@@ -213,7 +213,7 @@ class Config:
             config_source: Optional configuration source.
                           If not provided, uses environment variables.
         """
-        self.config_path = config_path or str(Path(__file__).parent.parent.parent / 'config.yaml')
+        self.config_path = config_path or str(Path(__file__).parent.parent.parent.parent / 'config.yaml')
         self.config_source = config_source or EnvConfigSource()
         self.file_source = FileConfigSource(self.config_path)
         self.config = self._load_config()
