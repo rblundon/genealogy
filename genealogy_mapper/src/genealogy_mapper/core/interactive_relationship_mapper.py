@@ -43,13 +43,19 @@ class InteractiveRelationshipMapper:
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.close()
     
-    def get_individuals_without_parents(self) -> List[Dict[str, Any]]:
-        """Get all individuals who don't have PARENT_OF relationships."""
+    def get_individuals_without_relationships(self) -> List[Dict[str, Any]]:
+        """Get all individuals who don't have any relationships."""
         with self.driver.session() as session:
             query = """
             MATCH (i:Individual)
             WHERE NOT EXISTS((i)-[:PARENT_OF]->()) 
             AND NOT EXISTS(()-[:PARENT_OF]->(i))
+            AND NOT EXISTS((i)-[:SPOUSE_OF]->())
+            AND NOT EXISTS(()-[:SPOUSE_OF]->(i))
+            AND NOT EXISTS((i)-[:SIBLING_OF]->())
+            AND NOT EXISTS(()-[:SIBLING_OF]->(i))
+            AND NOT EXISTS((i)-[:CHILD_OF]->())
+            AND NOT EXISTS(()-[:CHILD_OF]->(i))
             RETURN i.id as id, i.name as name, i.gender as gender
             ORDER BY i.name
             """
@@ -261,18 +267,18 @@ class InteractiveRelationshipMapper:
         """Run the interactive relationship mapping process."""
         console.print(Panel.fit(
             "[bold blue]Interactive Relationship Mapper[/bold blue]\n"
-            "This tool will help you add missing parental relationships.",
+            "This tool will help you add missing relationships to isolated individuals.",
             title="Genealogy Mapper"
         ))
         
-        # Get individuals without parents
-        individuals = self.get_individuals_without_parents()
+        # Get individuals without any relationships
+        individuals = self.get_individuals_without_relationships()
         
         if not individuals:
-            console.print("[green]All individuals already have parental relationships![/green]")
+            console.print("[green]All individuals already have relationships![/green]")
             return
         
-        console.print(f"\n[bold]Found {len(individuals)} individuals without parental relationships:[/bold]")
+        console.print(f"\n[bold]Found {len(individuals)} individuals without any relationships:[/bold]")
         
         # Display the list
         table = Table(show_header=True, header_style="bold magenta")
