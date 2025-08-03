@@ -425,7 +425,53 @@ def extract_obit_text(
 @click.option('--config-path', type=click.Path(), help='Path to config file (default: project_root/config.yaml)')
 def init_database(db_directory: Optional[str] = None, config_path: Optional[str] = None):
     """Initialize the Neo4j database with GEDCOM schema."""
-    init_db(db_directory, config_path)
+    try:
+        from genealogy_mapper.core.db_init import init_db
+        success = init_db(db_directory, config_path)
+        if success:
+            click.echo("✅ Database initialized successfully")
+        else:
+            click.echo("❌ Failed to initialize database")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.option('--db-directory', type=click.Path(), help='Path to Neo4j database directory (default: project_root/data/neo4j)')
+@click.option('--config-path', type=click.Path(), help='Path to config file (default: project_root/config.yaml)')
+@click.option('--force', is_flag=True, help='Skip confirmation prompt')
+def clear_database(db_directory: Optional[str] = None, config_path: Optional[str] = None, force: bool = False):
+    """Clear all data from the Neo4j database."""
+    try:
+        if not force:
+            if not click.confirm("⚠️  This will delete ALL data from the database. Are you sure?"):
+                click.echo("Operation cancelled.")
+                return
+        
+        from genealogy_mapper.core.config import Config
+        from neo4j import GraphDatabase
+        
+        # Get configuration
+        config = Config(config_path)
+        neo4j_config = config.get_neo4j_config()
+        
+        # Connect to database
+        driver = GraphDatabase.driver(
+            neo4j_config['uri'], 
+            auth=(neo4j_config['user'], neo4j_config['password'])
+        )
+        
+        with driver.session() as session:
+            # Clear all nodes and relationships
+            result = session.run("MATCH (n) DETACH DELETE n RETURN count(n) as deleted")
+            record = result.single()
+            deleted_count = record['deleted'] if record else 0
+            
+            click.echo(f"✅ Cleared {deleted_count} nodes from database")
+        
+        driver.close()
+        
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
 
 @cli.command()
 @click.option('--config-path', type=click.Path(), help='Path to save config file (default: project_root/config.yaml)')
@@ -914,7 +960,7 @@ def debug_relationships():
 @click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
 @click.option('--force', is_flag=True, help='Force rescrape even if URL exists')
 def add_obituary(url: str, dry_run: bool, force: bool):
-    """Add a new obituary URL to the database and process it."""
+    """Add a new obituary URL to the database."""
     try:
         # Extract domain for source
         domain = urlparse(url).netloc.lower()
@@ -926,18 +972,11 @@ def add_obituary(url: str, dry_run: bool, force: bool):
                 if not dry_run:
                     click.echo(f"Successfully added obituary URL: {url}")
                     click.echo(f"Source detected: {source}")
-                    # Automatically process the obituary
-                    with ObituaryProcessor() as processor:
-                        text = processor.extract_and_store_text(obituary_id)
-                        if text:
-                            click.echo(f"Successfully extracted and stored text for obituary {obituary_id}")
-                            person_id = processor.process_obituary(obituary_id)
-                            if person_id:
-                                click.echo(f"Successfully processed obituary and created person {person_id}")
-                            else:
-                                click.echo(f"Failed to process obituary after addition (ID: {obituary_id})")
-                        else:
-                            click.echo(f"Failed to extract and store text for obituary {obituary_id}")
+                    click.echo(f"Obituary ID: {obituary_id}")
+                    click.echo(f"Next steps:")
+                    click.echo(f"  1. Extract text: python -m genealogy_mapper.cli extract-text {obituary_id}")
+                    click.echo(f"  2. Create individual: python -m genealogy_mapper.cli create-individual {obituary_id}")
+                    click.echo(f"  3. Process relationships: python -m genealogy_mapper.cli process-relationships <individual_id>")
                 else:
                     click.echo(f"[Dry Run] Would add obituary URL: {url}")
             else:
@@ -1041,7 +1080,7 @@ def process_obituary(url: str, id: Optional[str] = None):
                 # Process existing obituary by ID
                 person_id = processor.process_obituary(id)
                 if person_id:
-                    click.echo(f"Successfully processed obituary {id} and created person {person_id}")
+                    click.echo(f"Successfully processed obituary {id} and created individual {person_id}")
                 else:
                     click.echo(f"Failed to process obituary {id}")
             else:
@@ -1055,7 +1094,7 @@ def process_obituary(url: str, id: Optional[str] = None):
                     # Process the newly added obituary
                     person_id = processor.process_obituary(obituary_id)
                     if person_id:
-                        click.echo(f"Successfully processed obituary {obituary_id} and created person {person_id}")
+                        click.echo(f"Successfully processed obituary {obituary_id} and created individual {person_id}")
                     else:
                         click.echo(f"Failed to process obituary {obituary_id}")
     except Exception as e:
@@ -1123,27 +1162,39 @@ def process_relationships_from_db(status: str, force: bool = False, dry_run: boo
                     continue
                 
                 try:
-                    # Prepare the prompt for OpenAI
-                    prompt = f"""Use Named Entity Recognition (NER): Identify all individuals identified as having familial relationships in the sources and create a neo4j person node for each unique individual, using GEDCOM-compatible properties include neo4j relationship mappings.
+                    # Check for cached analysis first
+                    cached_analysis = obituary_manager.get_openai_cache(obituary.get('id'))
+                    
+                    if cached_analysis:
+                        logger.info(f"Using cached analysis for obituary: {obituary.get('url')}")
+                        analysis = cached_analysis
+                    else:
+                        logger.info(f"Generating new analysis for obituary: {obituary.get('url')}")
+                        
+                        # Prepare the prompt for OpenAI
+                        prompt = f"""Use Named Entity Recognition (NER): Identify all individuals identified as having familial relationships in the sources and create a neo4j person node for each unique individual, using GEDCOM-compatible properties include neo4j relationship mappings.
 
 Obituary text:
 {obituary['extracted_text']}
 
 Please provide a detailed analysis of all people and their relationships."""
 
-                    # Call OpenAI API
-                    response = client.chat.completions.create(
-                        model=openai_config.get('model', 'gpt-4-turbo-preview'),
-                        messages=[
-                            {"role": "system", "content": "You are a genealogy expert specializing in extracting family relationships from obituaries."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=float(openai_config.get('temperature', 0.1)),
-                        max_tokens=int(openai_config.get('max_tokens', 2000))
-                    )
-                    
-                    # Parse the response
-                    analysis = response.choices[0].message.content
+                        # Call OpenAI API
+                        response = client.chat.completions.create(
+                            model=openai_config.get('model', 'gpt-3.5-turbo'),
+                            messages=[
+                                {"role": "system", "content": "You are a genealogy expert specializing in extracting family relationships from obituaries."},
+                                {"role": "user", "content": prompt}
+                            ],
+                            temperature=float(openai_config.get('temperature', 0.1)),
+                            max_tokens=int(openai_config.get('max_tokens', 2000))
+                        )
+                        
+                        # Parse the response
+                        analysis = response.choices[0].message.content
+                        
+                        # Store in cache
+                        obituary_manager.store_openai_cache(obituary.get('id'), analysis)
                     
                     # Create result entry
                     processed_item = {
@@ -1192,6 +1243,287 @@ Please provide a detailed analysis of all people and their relationships."""
     finally:
         obituary_manager.close()
         relationship_processor.close()
+
+@cli.command()
+def show_cache_status():
+    """Show the status of OpenAI cache for all obituaries."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize manager
+        obituary_manager = ObituaryManager(neo4j_config)
+        
+        with obituary_manager.driver.session() as session:
+            query = """
+            MATCH (o:Obituary)
+            RETURN o.id as id, o.url as url, o.openai_cache IS NOT NULL as has_cache, 
+                   o.openai_cache_timestamp as cache_time
+            ORDER BY o.created_at
+            """
+            result = session.run(query)
+            records = [r.data() for r in result]
+            
+            if not records:
+                click.echo("ℹ️  No obituaries found")
+                return
+                
+            click.echo("\n📊 OpenAI Cache Status:")
+            click.echo("=" * 80)
+            
+            cached_count = 0
+            for record in records:
+                status = "✅ Cached" if record['has_cache'] else "❌ Not cached"
+                cache_time = record['cache_time'] if record['cache_time'] else "N/A"
+                click.echo(f"{record['id']}: {status}")
+                click.echo(f"  URL: {record['url']}")
+                if record['has_cache']:
+                    click.echo(f"  Cached: {cache_time}")
+                click.echo()
+                if record['has_cache']:
+                    cached_count += 1
+            
+            total = len(records)
+            click.echo(f"📈 Summary: {cached_count}/{total} obituaries cached ({cached_count/total*100:.1f}%)")
+            
+    except Exception as e:
+        logger.error(f"Error showing cache status: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
+
+@cli.command()
+@click.option('--obituary-id', help='Clear cache for specific obituary ID')
+@click.option('--all', is_flag=True, help='Clear cache for all obituaries')
+def clear_openai_cache(obituary_id: Optional[str] = None, all: bool = False):
+    """Clear cached OpenAI analysis from obituary records."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize manager
+        obituary_manager = ObituaryManager(neo4j_config)
+        
+        if obituary_id:
+            # Clear cache for specific obituary
+            with obituary_manager.driver.session() as session:
+                query = """
+                MATCH (o:Obituary {id: $obituary_id})
+                REMOVE o.openai_cache, o.openai_cache_timestamp
+                RETURN o
+                """
+                result = session.run(query, obituary_id=obituary_id)
+                record = result.single()
+                if record:
+                    click.echo(f"✅ Cleared cache for obituary: {obituary_id}")
+                else:
+                    click.echo(f"❌ Obituary not found: {obituary_id}")
+                    
+        elif all:
+            # Clear cache for all obituaries
+            with obituary_manager.driver.session() as session:
+                query = """
+                MATCH (o:Obituary)
+                WHERE o.openai_cache IS NOT NULL
+                REMOVE o.openai_cache, o.openai_cache_timestamp
+                RETURN count(o) as cleared_count
+                """
+                result = session.run(query)
+                record = result.single()
+                if record:
+                    click.echo(f"✅ Cleared cache for {record['cleared_count']} obituaries")
+                else:
+                    click.echo("ℹ️  No cached obituaries found")
+        else:
+            click.echo("❌ Please specify --obituary-id or --all")
+            
+    except Exception as e:
+        logger.error(f"Error clearing OpenAI cache: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
+
+@cli.command()
+@click.argument('obituary_id')
+@click.option('--person-name', help='Name of the person to link to')
+@click.option('--auto-link', is_flag=True, help='Automatically link without prompting')
+def link_obituary_to_person(obituary_id: str, person_name: Optional[str] = None, auto_link: bool = False):
+    """Link an obituary to a person with interactive confirmation."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize manager
+        obituary_manager = ObituaryManager(neo4j_config)
+        
+        # Get obituary details
+        with obituary_manager.driver.session() as session:
+            query = """
+            MATCH (o:Obituary {id: $obituary_id})
+            RETURN o
+            """
+            result = session.run(query, obituary_id=obituary_id)
+            obituary = result.single()
+            
+            if not obituary:
+                click.echo(f"❌ Obituary {obituary_id} not found")
+                return
+        
+        obituary_data = dict(obituary['o'])
+        click.echo(f"\n📰 Obituary: {obituary_data.get('url', 'Unknown URL')}")
+        
+        # Check if already linked
+        existing_person = obituary_manager.get_person_by_obituary(obituary_id)
+        if existing_person:
+            click.echo(f"✅ Already linked to: {existing_person.get('name_full', 'Unknown')}")
+            return
+        
+        # Extract person name from obituary if not provided
+        if not person_name:
+            # Try to extract from obituary text or URL
+            extracted_text = obituary_data.get('extracted_text', '')
+            if extracted_text:
+                # Simple extraction - look for common patterns
+                lines = extracted_text.split('\n')
+                for line in lines[:10]:  # Check first 10 lines
+                    if any(keyword in line.lower() for keyword in ['obituary', 'death', 'passed', 'died']):
+                        # Extract name from this line
+                        import re
+                        name_match = re.search(r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)', line)
+                        if name_match:
+                            person_name = name_match.group(1)
+                            break
+            
+            if not person_name:
+                # Extract from URL
+                url = obituary_data.get('url', '')
+                if 'name/' in url:
+                    person_name = url.split('name/')[1].split('-obituary')[0].replace('-', ' ').title()
+        
+        if not person_name:
+            click.echo("❌ Could not determine person name from obituary")
+            return
+        
+        click.echo(f"👤 Extracted person name: {person_name}")
+        
+        # Find existing persons with similar names
+        existing_persons = obituary_manager.find_existing_person_by_name(person_name)
+        
+        if existing_persons:
+            click.echo(f"\n🔍 Found {len(existing_persons)} existing persons with similar names:")
+            for i, person in enumerate(existing_persons, 1):
+                click.echo(f"  {i}. {person.get('name_full', 'Unknown')} (ID: {person.get('id', 'Unknown')})")
+            
+            if not auto_link:
+                choice = click.prompt(
+                    f"\nSelect person to link to (1-{len(existing_persons)}) or 'n' for new person",
+                    type=str
+                )
+                
+                if choice.lower() == 'n':
+                    # Create new person
+                    click.echo("Creating new person...")
+                    # This would need to be implemented based on your person creation logic
+                    click.echo("⚠️  Person creation not yet implemented")
+                    return
+                else:
+                    try:
+                        selected_index = int(choice) - 1
+                        if 0 <= selected_index < len(existing_persons):
+                            selected_person = existing_persons[selected_index]
+                            person_id = selected_person.get('id')
+                            
+                            if obituary_manager.link_obituary_to_person(obituary_id, person_id):
+                                click.echo(f"✅ Successfully linked obituary to {selected_person.get('name_full')}")
+                            else:
+                                click.echo("❌ Failed to link obituary to person")
+                        else:
+                            click.echo("❌ Invalid selection")
+                    except ValueError:
+                        click.echo("❌ Invalid input")
+            else:
+                # Auto-link to first match
+                selected_person = existing_persons[0]
+                person_id = selected_person.get('id')
+                
+                if obituary_manager.link_obituary_to_person(obituary_id, person_id):
+                    click.echo(f"✅ Auto-linked obituary to {selected_person.get('name_full')}")
+                else:
+                    click.echo("❌ Failed to auto-link obituary to person")
+        else:
+            click.echo(f"\n✅ No existing persons found with name '{person_name}'")
+            click.echo("This obituary will be linked to a new person when processed")
+            
+    except Exception as e:
+        logger.error(f"Error linking obituary to person: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
+
+@cli.command()
+@click.argument('person_id')
+def show_person_obituary(person_id: str):
+    """Show the obituary linked to a person."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize manager
+        obituary_manager = ObituaryManager(neo4j_config)
+        
+        obituary = obituary_manager.get_obituary_by_person(person_id)
+        
+        if obituary:
+            click.echo(f"\n📰 Obituary for person {person_id}:")
+            click.echo(f"  URL: {obituary.get('url', 'Unknown')}")
+            click.echo(f"  Status: {obituary.get('status', 'Unknown')}")
+            click.echo(f"  Created: {obituary.get('created_at', 'Unknown')}")
+            
+            # Check cache status
+            has_cache = obituary_manager.has_openai_cache(obituary.get('id'))
+            click.echo(f"  OpenAI Cache: {'✅ Available' if has_cache else '❌ Not available'}")
+        else:
+            click.echo(f"❌ No obituary found for person {person_id}")
+            
+    except Exception as e:
+        logger.error(f"Error showing person obituary: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
+
+@cli.command()
+@click.argument('obituary_id')
+def show_obituary_person(obituary_id: str):
+    """Show the person linked to an obituary."""
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Initialize manager
+        obituary_manager = ObituaryManager(neo4j_config)
+        
+        person = obituary_manager.get_person_by_obituary(obituary_id)
+        
+        if person:
+            click.echo(f"\n👤 Person for obituary {obituary_id}:")
+            click.echo(f"  Name: {person.get('name_full', 'Unknown')}")
+            click.echo(f"  ID: {person.get('id', 'Unknown')}")
+            click.echo(f"  Gender: {person.get('gender', 'Unknown')}")
+            click.echo(f"  Birth Date: {person.get('birth_date', 'Unknown')}")
+            click.echo(f"  Death Date: {person.get('death_date', 'Unknown')}")
+        else:
+            click.echo(f"❌ No person linked to obituary {obituary_id}")
+            
+    except Exception as e:
+        logger.error(f"Error showing obituary person: {e}")
+        raise click.ClickException(str(e))
+    finally:
+        obituary_manager.close()
 
 @cli.command()
 @click.option('--dry-run', is_flag=True, help='Show what would be changed without making changes')
@@ -1353,6 +1685,115 @@ def interactive_relationship_mapper():
     except Exception as e:
         logger.error(f"Error in interactive relationship mapper: {e}")
         raise click.ClickException(str(e))
+
+@cli.command()
+@click.argument('obituary_id')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
+def extract_text(obituary_id: str, dry_run: bool):
+    """Extract text from an obituary URL."""
+    try:
+        with ObituaryProcessor() as processor:
+            if dry_run:
+                click.echo(f"[Dry Run] Would extract text for obituary: {obituary_id}")
+                return
+            
+            text = processor.extract_and_store_text(obituary_id)
+            if text:
+                click.echo(f"Successfully extracted and stored text for obituary {obituary_id}")
+                click.echo(f"Next step: python -m genealogy_mapper.cli create-individual {obituary_id}")
+            else:
+                click.echo(f"Failed to extract and store text for obituary {obituary_id}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.argument('obituary_id')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
+def create_individual(obituary_id: str, dry_run: bool):
+    """Create an Individual record from extracted obituary text."""
+    try:
+        with ObituaryProcessor() as processor:
+            if dry_run:
+                click.echo(f"[Dry Run] Would create individual for obituary: {obituary_id}")
+                return
+            
+            individual_id = processor.process_obituary(obituary_id)
+            if individual_id:
+                click.echo(f"Successfully created individual {individual_id} for obituary {obituary_id}")
+                click.echo(f"Next step: python -m genealogy_mapper.cli process-relationships {individual_id}")
+            else:
+                click.echo(f"Failed to create individual for obituary {obituary_id}")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.argument('individual_id')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
+def process_relationships(individual_id: str, dry_run: bool):
+    """Process relationships for an Individual record."""
+    try:
+        if dry_run:
+            click.echo(f"[Dry Run] Would process relationships for individual: {individual_id}")
+            return
+        
+        # TODO: Implement relationship processing
+        click.echo(f"Relationship processing for individual {individual_id} - Not yet implemented")
+        click.echo(f"Workflow complete!")
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
+
+@cli.command()
+@click.argument('url')
+@click.option('--dry-run', is_flag=True, help='Show what would be done without making changes')
+@click.option('--force', is_flag=True, help='Force rescrape even if URL exists')
+def process_obituary(url: str, dry_run: bool, force: bool):
+    """Complete obituary processing workflow from URL to individual creation."""
+    try:
+        click.echo(f"🔄 Starting complete obituary workflow for: {url}")
+        
+        # Step 1: Add obituary URL
+        click.echo(f"\n📝 Step 1: Adding obituary URL...")
+        domain = urlparse(url).netloc.lower()
+        source = "legacy.com" if "legacy.com" in domain else domain
+        
+        with ObituaryManager() as manager:
+            obituary_id = manager.add_obituary_url(url, source, dry_run=dry_run, force_rescrape=force)
+            if not obituary_id:
+                click.echo(f"❌ Failed to add obituary URL: {url}")
+                return
+            
+            click.echo(f"✅ Successfully added obituary URL: {url}")
+            click.echo(f"📋 Obituary ID: {obituary_id}")
+            
+            if dry_run:
+                click.echo(f"[Dry Run] Would continue with text extraction and individual creation")
+                return
+            
+            # Step 2: Extract text
+            click.echo(f"\n📄 Step 2: Extracting text from obituary...")
+            with ObituaryProcessor() as processor:
+                text = processor.extract_and_store_text(obituary_id)
+                if not text:
+                    click.echo(f"❌ Failed to extract and store text for obituary {obituary_id}")
+                    return
+                
+                click.echo(f"✅ Successfully extracted and stored text for obituary {obituary_id}")
+            
+            # Step 3: Create individual
+            click.echo(f"\n👤 Step 3: Creating individual record...")
+            with ObituaryProcessor() as processor:
+                individual_id = processor.process_obituary(obituary_id)
+                if not individual_id:
+                    click.echo(f"❌ Failed to create individual for obituary {obituary_id}")
+                    return
+                
+                click.echo(f"✅ Successfully created individual {individual_id} for obituary {obituary_id}")
+            
+            click.echo(f"\n🎉 Workflow complete! Individual created: {individual_id}")
+            click.echo(f"Next step: python -m genealogy_mapper.cli process-relationships {individual_id}")
+            
+    except Exception as e:
+        click.echo(f"Error: {str(e)}")
 
 
 if __name__ == '__main__':

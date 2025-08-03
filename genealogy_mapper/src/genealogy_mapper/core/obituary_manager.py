@@ -106,11 +106,7 @@ class ObituaryManager:
         # Normalize the URL first
         url = self._normalize_url(url)
         
-        metadata = {
-            "newspaper": "Unknown",
-            "location": "Unknown",
-            "publication_date": "Unknown"
-        }
+        metadata = {}
         
         try:
             response = self.session.get(url, timeout=self.timeout)
@@ -119,18 +115,8 @@ class ObituaryManager:
             # Extract domain for source
             domain = urlparse(url).netloc.lower()
             
-            # Basic metadata extraction
-            if "legacy.com" in domain:
-                # Extract newspaper from URL path
-                path_parts = urlparse(url).path.split('/')
-                if len(path_parts) > 2:
-                    metadata["newspaper"] = path_parts[2].replace('-', ' ').title()
-                
-                # Extract location if available in URL
-                if len(path_parts) > 3:
-                    location = path_parts[3].replace('-', ' ').title()
-                    if location and location != "Obituaries":
-                        metadata["location"] = location
+            # Basic metadata extraction (removed newspaper, location, publication_date)
+            # Additional metadata can be added here if needed
             
             return metadata
             
@@ -191,19 +177,13 @@ class ObituaryManager:
                     o.status = 'PENDING',
                     o.source = $source,
                     o.created_at = datetime(),
-                    o.updated_at = datetime(),
-                    o.newspaper = $newspaper,
-                    o.location = $location,
-                    o.publication_date = $publication_date
+                    o.updated_at = datetime()
                 RETURN o.id as id
                 """
                 result = session.run(query, 
                     url=url, 
                     id=obituary_id, 
-                    source=source,
-                    newspaper=metadata["newspaper"],
-                    location=metadata["location"],
-                    publication_date=metadata["publication_date"]
+                    source=source
                 )
                 record = result.single()
                 if record:
@@ -269,7 +249,7 @@ class ObituaryManager:
                                     # Process existing obituary by ID
                                     person_id = processor.process_obituary(obituary_id)
                                     if person_id:
-                                        logger.info(f"Successfully processed obituary {obituary_id} and created person {person_id}")
+                                        logger.info(f"Successfully processed obituary {obituary_id} and created individual {person_id}")
                                         self.update_obituary_status(url, "COMPLETED")
                                         processed.append(url_data)
                                     else:
@@ -464,11 +444,194 @@ class ObituaryManager:
                         'status': obit_data.get('status'),
                         'source': obit_data.get('source'),
                         'created_at': obit_data.get('created_at'),
-                        'updated_at': obit_data.get('updated_at')
+                        'updated_at': obit_data.get('updated_at'),
+                        'openai_cache': obit_data.get('openai_cache')
                     })
                 
                 logger.info(f"Found {len(obituaries)} obituaries with extracted text")
                 return obituaries
         except Exception as e:
             logger.error(f"Error getting obituaries with text: {str(e)}")
-            return [] 
+            return []
+
+    def store_openai_cache(self, obituary_id: str, analysis: str) -> bool:
+        """Store OpenAI analysis in the obituary record as cache.
+        
+        Args:
+            obituary_id: The ID of the obituary
+            analysis: The OpenAI analysis response
+            
+        Returns:
+            bool: True if successfully stored, False otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (o:Obituary {id: $obituary_id})
+                SET o.openai_cache = $analysis,
+                    o.openai_cache_timestamp = datetime()
+                RETURN o
+                """
+                result = session.run(query, obituary_id=obituary_id, analysis=analysis)
+                record = result.single()
+                if record:
+                    logger.info(f"Stored OpenAI cache for obituary {obituary_id}")
+                    return True
+                else:
+                    logger.error(f"Obituary {obituary_id} not found")
+                    return False
+        except Exception as e:
+            logger.error(f"Error storing OpenAI cache: {str(e)}")
+            return False
+
+    def get_openai_cache(self, obituary_id: str) -> Optional[str]:
+        """Get cached OpenAI analysis for an obituary.
+        
+        Args:
+            obituary_id: The ID of the obituary
+            
+        Returns:
+            Optional[str]: Cached analysis if available, None otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (o:Obituary {id: $obituary_id})
+                RETURN o.openai_cache as cache
+                """
+                result = session.run(query, obituary_id=obituary_id)
+                record = result.single()
+                if record and record['cache']:
+                    logger.info(f"Found cached OpenAI analysis for obituary {obituary_id}")
+                    return record['cache']
+                else:
+                    logger.info(f"No cached analysis found for obituary {obituary_id}")
+                    return None
+        except Exception as e:
+            logger.error(f"Error retrieving OpenAI cache: {str(e)}")
+            return None
+
+    def has_openai_cache(self, obituary_id: str) -> bool:
+        """Check if an obituary has cached OpenAI analysis.
+        
+        Args:
+            obituary_id: The ID of the obituary
+            
+        Returns:
+            bool: True if cached analysis exists, False otherwise
+        """
+        return self.get_openai_cache(obituary_id) is not None
+
+    def find_existing_person_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Find an existing person by name (case-insensitive).
+        
+        Args:
+            name: The name to search for
+            
+        Returns:
+            Optional[Dict[str, Any]]: Person data if found, None otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (p:Person)
+                WHERE toLower(p.name_full) CONTAINS toLower($name) 
+                   OR toLower($name) CONTAINS toLower(p.name_full)
+                RETURN p
+                LIMIT 10
+                """
+                result = session.run(query, name=name)
+                records = [dict(record['p']) for record in result]
+                return records
+        except Exception as e:
+            logger.error(f"Error finding existing person: {str(e)}")
+            return []
+
+    def link_obituary_to_person(self, obituary_id: str, person_id: str) -> bool:
+        """Link an obituary to a person (1:1 relationship).
+        
+        Args:
+            obituary_id: The ID of the obituary
+            person_id: The ID of the person
+            
+        Returns:
+            bool: True if successfully linked, False otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                # First, check if obituary is already linked
+                check_query = """
+                MATCH (o:Obituary {id: $obituary_id})
+                RETURN o
+                """
+                result = session.run(check_query, obituary_id=obituary_id)
+                obituary = result.single()
+                
+                if not obituary:
+                    logger.error(f"Obituary {obituary_id} not found")
+                    return False
+                
+                # Create the relationship
+                link_query = """
+                MATCH (o:Obituary {id: $obituary_id})
+                MATCH (p:Person {id: $person_id})
+                MERGE (o)-[:BELONGS_TO]->(p)
+                RETURN o, p
+                """
+                result = session.run(link_query, obituary_id=obituary_id, person_id=person_id)
+                record = result.single()
+                
+                if record:
+                    logger.info(f"Successfully linked obituary {obituary_id} to person {person_id}")
+                    return True
+                else:
+                    logger.error(f"Failed to link obituary {obituary_id} to person {person_id}")
+                    return False
+                    
+        except Exception as e:
+            logger.error(f"Error linking obituary to person: {str(e)}")
+            return False
+
+    def get_person_by_obituary(self, obituary_id: str) -> Optional[Dict[str, Any]]:
+        """Get the person linked to an obituary.
+        
+        Args:
+            obituary_id: The ID of the obituary
+            
+        Returns:
+            Optional[Dict[str, Any]]: Person data if found, None otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (o:Obituary {id: $obituary_id})-[:BELONGS_TO]->(p:Person)
+                RETURN p
+                """
+                result = session.run(query, obituary_id=obituary_id)
+                record = result.single()
+                return dict(record['p']) if record else None
+        except Exception as e:
+            logger.error(f"Error getting person by obituary: {str(e)}")
+            return None
+
+    def get_obituary_by_person(self, person_id: str) -> Optional[Dict[str, Any]]:
+        """Get the obituary linked to a person.
+        
+        Args:
+            person_id: The ID of the person
+            
+        Returns:
+            Optional[Dict[str, Any]]: Obituary data if found, None otherwise
+        """
+        try:
+            with self.driver.session() as session:
+                query = """
+                MATCH (p:Person {id: $person_id})<-[:BELONGS_TO]-(o:Obituary)
+                RETURN o
+                """
+                result = session.run(query, person_id=person_id)
+                record = result.single()
+                return dict(record['o']) if record else None
+        except Exception as e:
+            logger.error(f"Error getting obituary by person: {str(e)}")
+            return None 

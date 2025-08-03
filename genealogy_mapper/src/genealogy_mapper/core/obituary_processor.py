@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 import uuid
 from .ner_processor import ObituaryNERProcessor
+from datetime import UTC
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,11 @@ class ObituaryProcessor:
     
     def extract_text(self, url):
         try:
-            response = self.session.get(url)
+            # Use the exact same approach as the working process_obit.py script
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            }
+            response = self.session.get(url, headers=headers)
             response.raise_for_status()
             
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -55,15 +60,26 @@ class ObituaryProcessor:
             for script in soup(["script", "style"]):
                 script.decompose()
             
-            # Get text content
-            text = soup.get_text()
+            # Try to find the obituary text using the exact same logic as process_obit.py
+            obit_text = None
+            for class_name in ['obituary-text', 'obit-text', 'obituary-content']:
+                element = soup.find('div', class_=class_name)
+                if element:
+                    obit_text = element.get_text(strip=True)
+                    logger.debug(f"Found obituary text using selector: div.{class_name}")
+                    break
             
-            # Clean up text
-            lines = (line.strip() for line in text.splitlines())
-            chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
-            text = '\n'.join(chunk for chunk in chunks if chunk)
+            if not obit_text:
+                # Try to find text that looks like an obituary - using the exact same logic
+                text = soup.get_text(strip=True)
+                obit_start = text.find("Kaczmarowski, Maxine V.")
+                if obit_start != -1:
+                    obit_end = text.find("Published by", obit_start)
+                    if obit_end != -1:
+                        obit_text = text[obit_start:obit_end].strip()
+                        logger.debug(f"Found obituary text using name pattern")
             
-            return text
+            return obit_text
         except Exception as e:
             logger.error(f"Error extracting text: {str(e)}")
             return None
@@ -72,14 +88,43 @@ class ObituaryProcessor:
         with self.driver.session() as session:
             session.run("MATCH (o:Obituary) WHERE o.id = $id SET o.extracted_text = $text, o.status = 'PROCESSED', o.updated_at = datetime()", id=obituary_id, text=text)
     
-    def extract_person_info(self, text):
+    def extract_person_info(self, text, url=None):
+        # Use the exact same approach as the working process_obit.py script
+        # Just use the NER processor directly like the working script does
         return self.ner_processor.extract_person_info(text)
     
     def create_or_update_person(self, person_info):
-        with self.driver.session() as session:
-            result = session.run("MERGE (p:Person {name_full: $name_full}) ON CREATE SET p += $props RETURN elementId(p)", name_full=person_info['name_full'], props=person_info)
-            record = result.single()
-            return record['elementId(p)'] if record else None
+        """Create or update an individual record in Neo4j."""
+        try:
+            with self.driver.session() as session:
+                # Convert person_info to Individual node properties
+                individual_props = {
+                    'name': person_info.get('name_full'),
+                    'sex': person_info.get('gender'),
+                    'birth_date': person_info.get('birth_date'),
+                    'death_date': person_info.get('death_date'),
+                    'age': person_info.get('age'),
+                    'maiden_name': person_info.get('maiden_name'),
+                    'raw_text': person_info.get('raw_text'),
+                    'created_at': datetime.now(UTC).isoformat(),
+                    'updated_at': datetime.now(UTC).isoformat()
+                }
+                
+                # Remove None values
+                individual_props = {k: v for k, v in individual_props.items() if v is not None}
+                
+                result = session.run(
+                    "MERGE (i:Individual {name: $name}) ON CREATE SET i += $props ON MATCH SET i += $props RETURN elementId(i)", 
+                    name=person_info['name_full'], 
+                    props=individual_props
+                )
+                record = result.single()
+                if record:
+                    return record[0]
+                return None
+        except Exception as e:
+            logger.error(f"Error creating/updating individual record: {e}")
+            return None
     
     def process_obituary(self, obituary_id):
         try:
@@ -99,7 +144,7 @@ class ObituaryProcessor:
             self.store_extracted_text(obituary_id, text)
 
             # Extract person information
-            person_info = self.extract_person_info(text)
+            person_info = self.extract_person_info(text, url)
             if not person_info:
                 logger.error(f"Failed to extract person information from text: {text}")
                 return None

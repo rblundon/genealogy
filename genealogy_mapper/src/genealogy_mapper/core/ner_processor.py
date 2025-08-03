@@ -72,8 +72,18 @@ class ObituaryNERProcessor(BaseNERProcessor):
             Formatted date string or None if parsing fails.
         """
         try:
+            # Skip obvious non-dates
+            if any(phrase in date_str.lower() for phrase in ['age', 'years', 'old', 'born', 'died']):
+                return None
+            
             # Try to parse the date
             parsed_date = parser.parse(date_str, fuzzy=True)
+            
+            # Validate the parsed date makes sense
+            current_year = 2025
+            if parsed_date.year < 1800 or parsed_date.year > current_year:
+                return None
+            
             # Format as "01 Jun 2025"
             return parsed_date.strftime("%d %b %Y")
         except (ValueError, TypeError) as e:
@@ -86,45 +96,59 @@ class ObituaryNERProcessor(BaseNERProcessor):
         maiden_name = None
         gender = None
         
-        # First try to find a name using spaCy's NER
-        doc = self.nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                full_name = ent.text.strip()
+        # First try regex patterns (they're more reliable for obituaries)
+        for pattern in NAME_PATTERNS:
+            match = re.search(pattern, text)
+            if match:
+                if len(match.groups()) == 3:  # First two patterns (with maiden name)
+                    if pattern.startswith(r'([A-Za-z]+),'):  # First pattern
+                        last_name, first_name, maiden = match.groups()
+                        full_name = f"{first_name.strip()} {last_name}"
+                    else:  # Second pattern
+                        first_name, last_name, maiden = match.groups()
+                        full_name = f"{first_name.strip()} {last_name}"
+                    maiden_name = maiden
+                else:  # Last two patterns (without maiden name)
+                    if pattern.startswith(r'([A-Za-z]+),'):  # Third pattern
+                        last_name, first_name = match.groups()
+                        full_name = f"{first_name.strip()} {last_name}"
+                    else:  # Fourth pattern
+                        first_name, last_name = match.groups()
+                        full_name = f"{first_name.strip()} {last_name}"
                 break
         
-        # If NER didn't find a name, try regex patterns
+        # If regex patterns didn't find a name, try obituary-specific patterns
         if not full_name:
-            for pattern in NAME_PATTERNS:
+            obituary_patterns = [
+                r'([A-Za-z]+),\s+([A-Za-z\s\.\'\"]+)\s+\([Nn][Ee][Ee]\s+([A-Za-z]+)\)',
+                r'([A-Za-z]+),\s+([A-Za-z\s\.\'\"]+)',
+                r'([A-Za-z\s\.\'\"]+)\s+\([Nn][Ee][Ee]\s+([A-Za-z]+)\)',
+            ]
+            
+            for pattern in obituary_patterns:
                 match = re.search(pattern, text)
                 if match:
-                    if len(match.groups()) == 3:  # First two patterns (with maiden name)
-                        if pattern.startswith(r'([A-Za-z]+),'):  # First pattern
-                            last_name, first_name, maiden = match.groups()
-                            full_name = f"{first_name.strip()} {last_name}"
-                        else:  # Second pattern
-                            first_name, last_name, maiden = match.groups()
-                            full_name = f"{first_name.strip()} {last_name}"
+                    if len(match.groups()) == 3:  # First pattern with maiden name
+                        last_name, first_name, maiden = match.groups()
+                        full_name = f"{first_name.strip()} {last_name}"
                         maiden_name = maiden
-                    else:  # Last two patterns (without maiden name)
-                        if pattern.startswith(r'([A-Za-z]+),'):  # Third pattern
+                    elif len(match.groups()) == 2:
+                        if pattern.endswith(r'\([Nn][Ee][Ee]\s+([A-Za-z]+)\)'):  # Third pattern
+                            first_name, maiden = match.groups()
+                            full_name = first_name.strip()
+                            maiden_name = maiden
+                        else:  # Second pattern
                             last_name, first_name = match.groups()
-                            full_name = f"{first_name.strip()} {last_name}"
-                        else:  # Fourth pattern
-                            first_name, last_name = match.groups()
                             full_name = f"{first_name.strip()} {last_name}"
                     break
         
-        # If still no name found, try to extract from the first sentence
+        # If still no name found, try spaCy NER as fallback
         if not full_name:
-            first_sentence = text.split('.')[0].strip()
-            words = first_sentence.split()
-            if len(words) >= 2:
-                # Try to find a name-like pattern (two capitalized words)
-                for i in range(len(words) - 1):
-                    if words[i][0].isupper() and words[i+1][0].isupper():
-                        full_name = f"{words[i]} {words[i+1]}"
-                        break
+            doc = self.nlp(text)
+            for ent in doc.ents:
+                if ent.label_ == "PERSON":
+                    full_name = ent.text.strip()
+                    break
         
         # Determine gender based on patterns
         for gender_type, patterns in GENDER_PATTERNS.items():
@@ -194,8 +218,8 @@ class ObituaryNERProcessor(BaseNERProcessor):
                 if death_date:
                     break
         
-        # If we still don't have dates, try using NER
-        if not birth_date or not death_date:
+        # If we still don't have a death date, try using NER
+        if not death_date:
             dates = []
             for ent in doc.ents:
                 if ent.label_ == "DATE":
@@ -208,8 +232,12 @@ class ObituaryNERProcessor(BaseNERProcessor):
                 dates.sort(key=lambda x: parser.parse(x, fuzzy=True))
                 if not birth_date and len(dates) > 0:
                     birth_date = dates[0]
-                if not death_date and len(dates) > 1:
-                    death_date = dates[-1]
+                if not death_date and len(dates) > 0:
+                    # Only use NER date for death if no death date was found by patterns
+                    if len(dates) > 1:
+                        death_date = dates[-1]
+                    elif not death_date:  # Only use single date if no death date found by patterns
+                        death_date = dates[0]
         
         return birth_date, death_date
     
@@ -273,11 +301,24 @@ class ObituaryNERProcessor(BaseNERProcessor):
         # Calculate birth year if we have death date and age but no birth date
         if not birth_date and death_date and age:
             try:
-                death_year = int(death_date.split()[-1])
-                birth_year = death_year - age
+                # Try to parse the death date and extract year
+                death_dt = parser.parse(death_date, fuzzy=True)
+                birth_year = death_dt.year - age
                 birth_date = f"01 Jan {birth_year}"
-            except (ValueError, IndexError):
-                pass
+                logger.info(f"Calculated birth year {birth_year} from death date {death_date} and age {age}")
+            except (ValueError, IndexError, AttributeError) as e:
+                logger.debug(f"Failed to calculate birth year: {e}")
+                # Fallback: try to extract year from death_date string
+                try:
+                    # Look for year pattern in death_date
+                    year_match = re.search(r'\d{4}', death_date)
+                    if year_match:
+                        death_year = int(year_match.group())
+                        birth_year = death_year - age
+                        birth_date = f"01 Jan {birth_year}"
+                        logger.info(f"Calculated birth year {birth_year} from death year {death_year} and age {age}")
+                except (ValueError, IndexError):
+                    pass
         
         # Extract organizations, education, and military service
         organizations = []

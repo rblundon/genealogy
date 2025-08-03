@@ -103,7 +103,7 @@ The configuration is loaded in this order:
 
 ## Usage
 
-### Basic Workflow
+### Quick Start (Recommended)
 
 1. **Set up configuration**
    ```bash
@@ -121,51 +121,100 @@ The configuration is loaded in this order:
    python -m genealogy_mapper.cli init-database
    ```
 
-3. **Import obituary URLs**
+3. **Process an obituary (complete workflow)**
    ```bash
-   python -m genealogy_mapper.cli import-url "https://example.com/obituary"
+   python -m genealogy_mapper.cli process-obituary "https://example.com/obituary"
    ```
 
-4. **Extract text from obituaries**
+This single command will:
+- Add the obituary URL to the database
+- Extract text from the obituary
+- Create an individual record
+- (Future: Process relationships)
+
+### Step-by-Step Workflow
+
+For more control or debugging, you can run each step individually:
+
+1. **Add obituary URL**
    ```bash
-   python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json
+   python -m genealogy_mapper.cli add-obituary "https://example.com/obituary"
    ```
 
-5. **Process obituaries to identify people**
+2. **Extract text from obituary**
    ```bash
-   python -m genealogy_mapper.cli add-obit-people -i obituary_urls.json
+   python -m genealogy_mapper.cli extract-text <obituary_id>
    ```
 
-6. **Extract relationships using OpenAI**
+3. **Create individual record**
    ```bash
-   python -m genealogy_mapper.cli extract-relationships -i obituary_urls.json -o relationships_analysis.json
+   python -m genealogy_mapper.cli create-individual <obituary_id>
    ```
 
-7. **Import relationships into Neo4j**
+4. **Process relationships (future)**
    ```bash
-   python -m genealogy_mapper.cli import-relationships -i relationships_analysis.json
+   python -m genealogy_mapper.cli process-relationships <individual_id>
    ```
 
-8. **Visualize the relationship graph**
-   ```bash
-   python -m genealogy_mapper.cli visualize-relationships -o family_tree.png
-   ```
+### Database Management
+
+**Clear all data:**
+```bash
+python -m genealogy_mapper.cli clear-database --force
+```
+
+**Reinitialize database:**
+```bash
+python -m genealogy_mapper.cli init-database
+```
+
+### Legacy Commands (Deprecated)
+
+The following commands are still available but not recommended for new workflows:
+
+- `extract-obit-text` - Use `extract-text` instead
+- `add-obit-people` - Use `create-individual` instead
+- `extract-relationships` - Use `process-relationships` instead
+- `import-relationships` - Use `process-relationships` instead
 
 ### Advanced Options
 
-#### Interactive Conflict Resolution
-```bash
-python -m genealogy_mapper.cli import-to-neo4j -i obituary_people.json --interactive
-```
-
 #### Dry Run Mode
 ```bash
-python -m genealogy_mapper.cli extract-relationships -i obituary_urls.json --dry-run
+# Test the complete workflow without making changes
+python -m genealogy_mapper.cli process-obituary "https://example.com/obituary" --dry-run
+
+# Test individual steps
+python -m genealogy_mapper.cli add-obituary "https://example.com/obituary" --dry-run
+python -m genealogy_mapper.cli extract-text <obituary_id> --dry-run
+python -m genealogy_mapper.cli create-individual <obituary_id> --dry-run
 ```
 
 #### Force Reprocessing
 ```bash
-python -m genealogy_mapper.cli extract-obit-text -i obituary_urls.json --force-rescrape
+# Force rescrape even if URL already exists
+python -m genealogy_mapper.cli process-obituary "https://example.com/obituary" --force
+```
+
+#### Interactive Relationship Mapping
+```bash
+# Add missing parental relationships interactively
+python -m genealogy_mapper.cli interactive-relationship-mapper
+```
+
+#### Traditional Name Normalization
+```bash
+# Apply traditional naming conventions (wife's last name to husband's)
+python -m genealogy_mapper.cli normalize-traditional-names
+```
+
+#### OpenAI Cache Management
+```bash
+# Show cache status for all obituaries
+python -m genealogy_mapper.cli show-cache-status
+
+# Clear OpenAI cache
+python -m genealogy_mapper.cli clear-openai-cache --all
 ```
 
 ### Testing Configuration
@@ -174,6 +223,51 @@ Test your OpenAI configuration:
 ```bash
 python -m genealogy_mapper.cli test-openai
 ```
+
+## Command Reference
+
+### Core Workflow Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `process-obituary` | Complete workflow from URL to individual | `process-obituary "https://example.com/obit"` |
+| `add-obituary` | Add obituary URL to database | `add-obituary "https://example.com/obit"` |
+| `extract-text` | Extract text from obituary | `extract-text <obituary_id>` |
+| `create-individual` | Create individual record | `create-individual <obituary_id>` |
+| `process-relationships` | Process relationships (future) | `process-relationships <individual_id>` |
+
+### Database Management
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `init-database` | Initialize database schema | `init-database` |
+| `clear-database` | Clear all data | `clear-database --force` |
+| `list-obituaries` | List all obituaries | `list-obituaries` |
+
+### Advanced Features
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `interactive-relationship-mapper` | Add missing parental relationships | `interactive-relationship-mapper` |
+| `normalize-traditional-names` | Apply traditional naming conventions | `normalize-traditional-names` |
+| `process-relationships-from-db` | Extract relationships from database | `process-relationships-from-db` |
+
+### Utility Commands
+
+| Command | Description | Example |
+|---------|-------------|---------|
+| `create-config` | Create default config file | `create-config` |
+| `test-openai` | Test OpenAI configuration | `test-openai` |
+| `show-cache-status` | Show OpenAI cache status | `show-cache-status` |
+| `clear-openai-cache` | Clear OpenAI cache | `clear-openai-cache --all` |
+| `visualize-relationships` | Create relationship graph | `visualize-relationships` |
+
+### Options
+
+Most commands support these common options:
+- `--dry-run`: Show what would be done without making changes
+- `--force`: Force reprocessing even if already exists
+- `--verbose`: Enable detailed logging
 
 ## Data Model
 

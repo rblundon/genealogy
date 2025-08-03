@@ -229,7 +229,7 @@ class RelationshipProcessor:
                         if not line:
                             continue
                         
-                                                if line.startswith('- Name:'):
+                        if line.startswith('- Name:'):
                             person_data['name'] = line.split(': ')[1]
                         elif line.startswith('- Gender:'):
                             gender_value = line.split(': ')[1]

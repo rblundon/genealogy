@@ -37,14 +37,26 @@ AGE_PATTERNS = [
 
 # Death date patterns (prioritized)
 DEATH_DATE_PATTERNS = [
-    # Format: died on January 1, 2020
+    # Format: died on Thursday, August 7, 2008
+    (r'died\s+on\s+([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: passed away on Thursday, August 7, 2008
+    (r'passed\s+away\s+on\s+([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: died Thursday, August 7, 2008
+    (r'died\s+([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: passed away Thursday, August 7, 2008
+    (r'passed\s+away\s+([A-Za-z]+,\s+[A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: died on August 7, 2008
     (r'died\s+on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
-    # Format: passed away on January 1, 2020
+    # Format: passed away on August 7, 2008
     (r'passed\s+away\s+on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
-    # Format: died January 1, 2020
+    # Format: died August 7, 2008
     (r'died\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
-    # Format: passed away January 1, 2020
+    # Format: passed away August 7, 2008
     (r'passed\s+away\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: on May 24, 2018 (common in obituaries)
+    (r'on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
+    # Format: May 24, 2018 (standalone date)
+    (r'([A-Za-z]+\s+\d{1,2},\s+\d{4})', 1, True),
     # Format: died on 01/01/2020
     (r'died\s+on\s+(\d{1,2}/\d{1,2}/\d{4})', 1, True),
     # Format: passed away on 01/01/2020
