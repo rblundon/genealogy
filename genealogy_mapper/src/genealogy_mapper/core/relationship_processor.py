@@ -188,8 +188,8 @@ class RelationshipProcessor:
                 if not section.strip():
                     continue
                     
-                # Check if this is a person section (starts with a number)
-                if section[0].isdigit():
+                # Check if this is a person section (starts with a number and contains detailed info)
+                if section[0].isdigit() and '   - Name:' in section:
                     # Extract person info
                     lines = section.split('\n')
                     name_line = lines[0]
@@ -228,16 +228,23 @@ class RelationshipProcessor:
                         line = line.strip()
                         if not line:
                             continue
-                            
-                        if line.startswith('   - Name:'):
+                        
+                                                if line.startswith('- Name:'):
                             person_data['name'] = line.split(': ')[1]
-                        elif line.startswith('   - Gender:'):
-                            person_data['gender'] = line.split(': ')[1]
-                        elif line.startswith('   - Birth Date:'):
+                        elif line.startswith('- Gender:'):
+                            gender_value = line.split(': ')[1]
+                            # Normalize gender values
+                            if gender_value.lower() == 'female':
+                                person_data['gender'] = 'F'
+                            elif gender_value.lower() == 'male':
+                                person_data['gender'] = 'M'
+                            else:
+                                person_data['gender'] = gender_value
+                        elif line.startswith('- Birth Date:'):
                             birth_date = line.split(': ')[1]
                             if birth_date != '(not provided)':
                                 person_data['birth_date'] = birth_date
-                        elif line.startswith('   - Death Date:'):
+                        elif line.startswith('- Death Date:'):
                             death_date = line.split(': ')[1]
                             if death_date != '(not provided)':
                                 person_data['death_date'] = death_date
@@ -314,7 +321,7 @@ class RelationshipProcessor:
                     """
                     properties = {
                         'name': person['name'],
-                        'sex': person['gender'],
+                        'gender': person['gender'],
                         'birth_date': person['birth_date'],
                         'death_date': person['death_date']
                     }
