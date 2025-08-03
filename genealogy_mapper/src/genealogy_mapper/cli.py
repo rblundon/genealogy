@@ -1326,5 +1326,34 @@ def normalize_traditional_names(dry_run: bool = False):
     finally:
         processor.close()
 
+
+@cli.command()
+def interactive_relationship_mapper():
+    """Interactive tool to add missing parental relationships.
+    
+    This command:
+    1. Finds all individuals without parental relationships
+    2. Asks user if they have additional information for each person
+    3. Prompts for father's and mother's names
+    4. Searches for existing persons or creates new ones
+    5. Links parents to children in the database
+    """
+    try:
+        # Load configuration
+        config = Config()
+        neo4j_config = config.get_neo4j_config()
+        
+        # Import the interactive mapper
+        from genealogy_mapper.core.interactive_relationship_mapper import InteractiveRelationshipMapper
+        
+        # Run the interactive mapping
+        with InteractiveRelationshipMapper(neo4j_config) as mapper:
+            mapper.run_interactive_mapping()
+        
+    except Exception as e:
+        logger.error(f"Error in interactive relationship mapper: {e}")
+        raise click.ClickException(str(e))
+
+
 if __name__ == '__main__':
     cli()
