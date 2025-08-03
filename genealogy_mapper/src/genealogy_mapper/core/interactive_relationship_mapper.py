@@ -275,10 +275,6 @@ class InteractiveRelationshipMapper:
         
         console.print(f"\n[bold cyan]Processing: {child_name}[/bold cyan]")
         
-        # Check if child needs a last name
-        if self._child_needs_last_name(child_name):
-            self._handle_child_last_name(child_id, child_name)
-        
         # Ask if user has additional information
         has_info = Confirm.ask(f"Do you have additional information for {child_name}?")
         if not has_info:
@@ -322,6 +318,10 @@ class InteractiveRelationshipMapper:
                     mother_data = self.create_new_person(mother_name, 'F')
                     console.print(f"[green]Created new mother: {mother_data['name']}[/green]")
                     self.verify_and_link_parent(child_id, mother_data, 'mother')
+        
+        # Check if child needs a last name after parents have been added
+        if self._child_needs_last_name(child_name):
+            self._handle_child_last_name(child_id, child_name)
         
         return True
     
