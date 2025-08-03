@@ -203,6 +203,64 @@ class InteractiveRelationshipMapper:
             console.print(f"[green]Successfully linked {parent_data['name']} as {parent_type}.[/green]")
             return True
     
+    def _child_needs_last_name(self, child_name: str) -> bool:
+        """Check if a child needs a last name (has only one name part)."""
+        name_parts = child_name.strip().split()
+        return len(name_parts) == 1
+    
+    def _get_father_last_name(self, child_id: str) -> Optional[str]:
+        """Get the father's last name for a child."""
+        with self.driver.session() as session:
+            query = """
+            MATCH (father:Individual)-[:PARENT_OF]->(child:Individual {id: $child_id})
+            WHERE father.gender = 'M'
+            RETURN father.name as father_name
+            LIMIT 1
+            """
+            result = session.run(query, child_id=child_id)
+            record = result.single()
+            
+            if record:
+                father_name = record['father_name']
+                name_parts = father_name.strip().split()
+                if len(name_parts) > 1:
+                    return name_parts[-1]  # Return last name
+            return None
+    
+    def _update_child_name(self, child_id: str, new_name: str) -> bool:
+        """Update a child's name in the database."""
+        with self.driver.session() as session:
+            query = """
+            MATCH (child:Individual {id: $child_id})
+            SET child.name = $new_name
+            RETURN child.name as name
+            """
+            result = session.run(query, child_id=child_id, new_name=new_name)
+            record = result.single()
+            return record is not None
+    
+    def _handle_child_last_name(self, child_id: str, child_name: str) -> None:
+        """Handle cases where a child needs a last name."""
+        console.print(f"\n[yellow]Note: {child_name} doesn't have a last name.[/yellow]")
+        
+        # Try to get father's last name
+        father_last_name = self._get_father_last_name(child_id)
+        
+        if father_last_name:
+            use_father_name = Confirm.ask(f"Use father's last name '{father_last_name}' for {child_name}?")
+            if use_father_name:
+                new_name = f"{child_name} {father_last_name}"
+                if self._update_child_name(child_id, new_name):
+                    console.print(f"[green]Updated {child_name} to {new_name}[/green]")
+                    return
+        
+        # Ask for custom last name
+        custom_last_name = Prompt.ask(f"Enter last name for {child_name} (or press Enter to skip)")
+        if custom_last_name:
+            new_name = f"{child_name} {custom_last_name}"
+            if self._update_child_name(child_id, new_name):
+                console.print(f"[green]Updated {child_name} to {new_name}[/green]")
+    
     def process_parent_information(self, child_data: Dict[str, Any]) -> bool:
         """Process parental information for a child.
         
@@ -216,6 +274,10 @@ class InteractiveRelationshipMapper:
         child_id = child_data['id']
         
         console.print(f"\n[bold cyan]Processing: {child_name}[/bold cyan]")
+        
+        # Check if child needs a last name
+        if self._child_needs_last_name(child_name):
+            self._handle_child_last_name(child_id, child_name)
         
         # Ask if user has additional information
         has_info = Confirm.ask(f"Do you have additional information for {child_name}?")
